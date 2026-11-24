@@ -2,8 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import 'react-native-url-polyfill/auto';
 
-// Reemplazar con las credenciales de tu proyecto Supabase cuando lo crees
-// También puedes usar variables en archivo .env (EXPO_PUBLIC_SUPABASE_URL y EXPO_PUBLIC_SUPABASE_ANON_KEY)
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://exlibris-demo.supabase.co';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_anon_placeholder_key_exlibris';
 

@@ -1,16 +1,24 @@
-import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, Pressable, Modal, TextInput, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar } from '@/components/ProgressBar';
-import { useExLibris, Book, BibliotecaItem } from '@/store/ExLibrisContext';
 import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { BibliotecaItem, Book, useExLibris } from '@/store/ExLibrisContext';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useRef, useState } from 'react';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function DetalleLibroScreen() {
   const router = useRouter();
   const { isbn } = useLocalSearchParams<{ isbn: string }>();
-  const { catalogo, getBibliotecaItem, actualizarProgreso, actualizarBitacora, agregarALaBiblioteca, removerDeBiblioteca } = useExLibris();
+  const {
+    catalogo,
+    getBibliotecaItem,
+    actualizarProgreso,
+    actualizarBitacora,
+    agregarALaBiblioteca,
+    removerDeBiblioteca,
+    obtenerMetricasLibro,
+  } = useExLibris();
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -224,14 +232,14 @@ export default function DetalleLibroScreen() {
               <View style={styles.cedulaField}>
                 <Text style={styles.fieldLabel}>Tienda / Origen</Text>
                 <Text style={styles.fieldValue}>
-                  {bibItem?.lugar_compra || 'Librería Antártica'}
+                  {bibItem?.lugar_compra}
                 </Text>
               </View>
 
               <View style={styles.cedulaField}>
                 <Text style={styles.fieldLabel}>Fecha de compra</Text>
                 <Text style={styles.fieldValue}>
-                  {bibItem?.fecha_compra || '12 de Octubre, 2024'}
+                  {bibItem?.fecha_compra}
                 </Text>
               </View>
             </View>
@@ -240,14 +248,14 @@ export default function DetalleLibroScreen() {
               <View style={styles.cedulaField}>
                 <Text style={styles.fieldLabel}>Inversión</Text>
                 <Text style={[styles.fieldValue, { color: ExLibrisColors.primary, fontWeight: '800' }]}>
-                  ${(bibItem?.precio_compra || 15990).toLocaleString('es-CL')} CLP
+                  ${(bibItem?.precio_compra || 0).toLocaleString('es-CL')} CLP
                 </Text>
               </View>
 
               <View style={styles.cedulaField}>
                 <Text style={styles.fieldLabel}>Formato & Edición</Text>
                 <Text style={styles.fieldValue}>
-                  {bibItem?.formato_edicion || 'Tapa dura · Con sobrecubierta mate'}
+                  {bibItem?.formato_edicion}
                 </Text>
               </View>
             </View>
@@ -314,26 +322,40 @@ export default function DetalleLibroScreen() {
         </View>
 
         {/* Botón inferior: Acceso a Reseñas Comunitarias */}
-        <Pressable
-          style={styles.btnComunidad}
-          onPress={() => router.push('/(tabs)/comunidad')}
-        >
-          <View style={styles.btnComunidadLeft}>
-            <View style={styles.comunidadIconBadge}>
-              <Ionicons name="people-outline" size={18} color="#FFFFFF" />
-            </View>
-            <View>
-              <Text style={styles.comunidadHeading}>Reseñas de la comunidad</Text>
-              <Text style={styles.comunidadSubheading}>
-                142 opiniones de lectores verificados
-              </Text>
-            </View>
-          </View>
-          <View style={styles.ratingBox}>
-            <Ionicons name="star" size={14} color={ExLibrisColors.gold} />
-            <Text style={styles.ratingBoxText}>{libro.rating || 4.8}</Text>
-          </View>
-        </Pressable>
+        {(() => {
+          const metricas = obtenerMetricasLibro(libro.isbn);
+          return (
+            <Pressable
+              style={styles.btnComunidad}
+              onPress={() => router.push({
+                pathname: '/(tabs)/comunidad',
+                params: { isbn: libro.isbn },
+              })}
+            >
+              <View style={styles.btnComunidadLeft}>
+                <View style={styles.comunidadIconBadge}>
+                  <Ionicons name="people-outline" size={18} color="#FFFFFF" />
+                </View>
+                <View>
+                  <Text style={styles.comunidadHeading}>Reseñas de la comunidad</Text>
+                  <Text style={styles.comunidadSubheading}>
+                    {metricas.totalVotos === 1
+                      ? '1 opinión de la comunidad'
+                      : metricas.totalVotos > 1
+                      ? `${metricas.totalVotos} opiniones de lectores`
+                      : 'Sin reseñas aún · ¡Sé el primero en opinar!'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.ratingBox}>
+                <Ionicons name="star" size={14} color={ExLibrisColors.gold} />
+                <Text style={styles.ratingBoxText}>
+                  {metricas.totalVotos > 0 && metricas.promedio !== null ? metricas.promedio.toFixed(1) : '—'}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })()}
 
         <View style={{ height: 40 }} />
       </ScrollView>

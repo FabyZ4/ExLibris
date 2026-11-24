@@ -27,6 +27,7 @@ export default function ExplorarScreen() {
     buscarEnCatalogo,
     agregarALaBiblioteca,
     biblioteca,
+    obtenerMetricasLibro,
   } = useExLibris();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoria, setSelectedCategoria] = useState('Todos');
@@ -163,11 +164,22 @@ export default function ExplorarScreen() {
                 <Text style={styles.carouselAuthor} numberOfLines={1}>
                   {item.autor}
                 </Text>
-                <View style={styles.carouselRating}>
-                  <Ionicons name="star" size={12} color={ExLibrisColors.gold} />
-                  <Text style={styles.ratingValue}>{item.rating || 4.8}</Text>
-                  <Text style={styles.ratingCount}>({item.rating_count || 1200})</Text>
-                </View>
+                {(() => {
+                  const metricas = obtenerMetricasLibro(item.isbn);
+                  return (
+                    <View style={styles.carouselRating}>
+                      <Ionicons
+                        name={metricas.promedio !== null ? 'star' : 'star-outline'}
+                        size={12}
+                        color={metricas.promedio !== null ? ExLibrisColors.gold : ExLibrisColors.textSecondary}
+                      />
+                      <Text style={styles.ratingValue}>
+                        {metricas.promedio !== null ? metricas.promedio.toFixed(1) : '—'}
+                      </Text>
+                      <Text style={styles.ratingCount}>({metricas.totalVotos})</Text>
+                    </View>
+                  );
+                })()}
               </Pressable>
             )}
           />

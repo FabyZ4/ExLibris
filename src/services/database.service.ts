@@ -161,7 +161,10 @@ export const actualizarProgresoDb = async (id_biblioteca: string, pagina_actual:
 };
 
 export const getResenasFromDb = async (isbn?: string) => {
-  let query = supabase.from('resenas').select('*, usuario(nombre_usuario, id_rol), libros(titulo, autor)').eq('estado', 'publicado');
+  let query = supabase
+    .from('resenas')
+    .select('*, usuario!resenas_id_usuario_fkey(nombre_usuario, id_rol), libros(titulo, autor)')
+    .eq('estado', 'publicado');
   if (isbn) query = query.eq('isbn', isbn);
   const { data, error } = await query.order('creado_el', { ascending: false });
   if (error) throw error;
@@ -174,8 +177,16 @@ export const crearResenaDb = async (resena: Partial<DbResena>) => {
   return data;
 };
 
+export const eliminarResenaPropia = async (id_resena: string) => {
+  const { error } = await supabase
+    .from('resenas')
+    .update({ estado: 'eliminado' })
+    .eq('id_resena', id_resena)
+    .eq('id_usuario', (await supabase.auth.getUser()).data.user?.id ?? '');
+  if (error) throw error;
+};
+
 export const eliminarResenaModeradorDb = async (id_resena: string) => {
-  // En Supabase la política RLS validará que el id_rol corresponda a moderador
   const { error } = await supabase
     .from('resenas')
     .update({ estado: 'eliminado' })
@@ -192,9 +203,170 @@ export const crearReporteDb = async (reporte: Partial<DbReporte>) => {
 export const getReportesPendientesDb = async () => {
   const { data, error } = await supabase
     .from('reportes')
-    .select('*, resenas(*, libros(titulo), usuario(nombre_usuario))')
+    .select('*, resenas(*, libros(titulo), usuario!resenas_id_usuario_fkey(nombre_usuario))')
     .eq('estado', 'pendiente')
     .order('creado_el', { ascending: false });
   if (error) throw error;
   return data || [];
+};
+
+export const darLikeResenaDb = async (id_resena: string, id_usuario: string) => {
+  const { error } = await supabase
+    .from('resena_likes')
+    .insert({ id_resena, id_usuario });
+  if (error) throw error;
+};
+
+export const quitarLikeResenaDb = async (id_resena: string, id_usuario: string) => {
+  const { error } = await supabase
+    .from('resena_likes')
+    .delete()
+    .eq('id_resena', id_resena)
+    .eq('id_usuario', id_usuario);
+  if (error) throw error;
+};
+
+export const getLikesResenaDb = async (id_resena?: string) => {
+  let query = supabase.from('resena_likes').select('id_resena, id_usuario');
+  if (id_resena) query = query.eq('id_resena', id_resena);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+};
+
+export const crearRespuestaDb = async (
+  id_resena: string,
+  id_usuario: string,
+  comentario: string,
+  id_respuesta_padre?: string
+) => {
+  const payload: Record<string, unknown> = { id_resena, id_usuario, comentario };
+  if (id_respuesta_padre) payload.id_respuesta_padre = id_respuesta_padre;
+  const { data, error } = await supabase
+    .from('resena_respuestas')
+    .insert(payload)
+    .select('*, usuario!resena_respuestas_id_usuario_fkey(nombre_usuario)');
+  if (error?.code === 'PGRST204' && id_respuesta_padre) {
+    throw new Error(
+      'Las respuestas anidadas aún no están habilitadas en Supabase. Ejecuta la migración de comentarios.'
+    );
+  }
+  if (error) throw error;
+  return data;
+};
+
+export const eliminarRespuestaDb = async (id_respuesta: string) => {
+  const { error } = await supabase
+    .from('resena_respuestas')
+    .delete()
+    .eq('id_respuesta', id_respuesta)
+    .eq('id_usuario', (await supabase.auth.getUser()).data.user?.id ?? '');
+  if (error) throw error;
+};
+
+export const getRespuestasResenaDb = async (id_resena?: string) => {
+  let query = supabase
+    .from('resena_respuestas')
+    .select('*, usuario!resena_respuestas_id_usuario_fkey(nombre_usuario), respuesta_likes(id_usuario)');
+  if (id_resena) query = query.eq('id_resena', id_resena);
+  const { data, error } = await query.order('creado_el', { ascending: true });
+  if (!error) return data || [];
+  if (error.code !== 'PGRST200' && error.code !== 'PGRST204') throw error;
+
+  console.warn(
+    'Supabase aún no tiene la migración de respuestas anidadas y sus likes; se cargarán las respuestas sin esas funciones.'
+  );
+  let legacyQuery = supabase
+    .from('resena_respuestas')
+    .select('*, usuario!resena_respuestas_id_usuario_fkey(nombre_usuario)');
+  if (id_resena) legacyQuery = legacyQuery.eq('id_resena', id_resena);
+  const legacyResult = await legacyQuery.order('creado_el', { ascending: true });
+  if (legacyResult.error) throw legacyResult.error;
+  return legacyResult.data || [];
+};
+
+export const darLikeRespuestaDb = async (id_respuesta: string, id_usuario: string) => {
+  const { error } = await supabase
+    .from('respuesta_likes')
+    .insert({ id_respuesta, id_usuario });
+  if (error) throw error;
+};
+
+export const quitarLikeRespuestaDb = async (id_respuesta: string, id_usuario: string) => {
+  const { error } = await supabase
+    .from('respuesta_likes')
+    .delete()
+    .eq('id_respuesta', id_respuesta)
+    .eq('id_usuario', id_usuario);
+  if (error) throw error;
+};
+
+const isValidUuid = (id?: string): boolean =>
+  typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+export const crearNotificacionDb = async (notif: {
+  id_usuario: string;
+  tipo: string;
+  titulo: string;
+  mensaje: string;
+  isbn?: string;
+  id_resena?: string;
+}) => {
+  const payload: Record<string, unknown> = {
+    id_usuario: notif.id_usuario,
+    tipo: notif.tipo,
+    titulo: notif.titulo,
+    mensaje: notif.mensaje,
+  };
+  if (notif.isbn && notif.isbn.trim()) {
+    payload.isbn = notif.isbn.trim();
+  }
+  if (isValidUuid(notif.id_resena)) {
+    payload.id_resena = notif.id_resena;
+  }
+
+  const { error } = await supabase.from('notificaciones').insert(payload);
+  if (error) {
+    console.error('Error al insertar notificación en Supabase:', error);
+    throw error;
+  }
+  return true;
+};
+
+export const getNotificacionesDb = async (id_usuario: string) => {
+  const { data, error } = await supabase
+    .from('notificaciones')
+    .select('*')
+    .eq('id_usuario', id_usuario)
+    .order('creado_el', { ascending: false });
+  if (error) {
+    console.error('Error al obtener notificaciones desde Supabase:', error);
+    throw error;
+  }
+  return data || [];
+};
+
+export const marcarNotificacionLeidaDb = async (id_notificacion: string) => {
+  const { error } = await supabase
+    .from('notificaciones')
+    .update({ leida: true })
+    .eq('id_notificacion', id_notificacion);
+  if (error) throw error;
+};
+
+export const eliminarNotificacionDb = async (id_notificacion: string) => {
+  const { error } = await supabase
+    .from('notificaciones')
+    .delete()
+    .eq('id_notificacion', id_notificacion);
+  if (error) throw error;
+};
+
+export const eliminarBibliotecaItemDb = async (id_usuario: string, isbn: string) => {
+  const { error } = await supabase
+    .from('biblioteca_usuario')
+    .delete()
+    .eq('id_usuario', id_usuario)
+    .eq('isbn', isbn);
+  if (error) throw error;
 };

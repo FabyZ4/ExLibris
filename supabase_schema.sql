@@ -351,3 +351,276 @@ from (values
 ) as mapping(isbn, nombre_categoria)
 join public.categorias on categorias.nombre_categoria = mapping.nombre_categoria
 on conflict (isbn, id_categoria) do nothing;
+
+-- ============================================================
+-- 9. TABLA: resena_likes (Likes en comentarios comunitarios)
+-- ============================================================
+create table if not exists public.resena_likes (
+    id_resena uuid not null references public.resenas(id_resena) on delete cascade,
+    id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
+    creado_el timestamptz default now(),
+    primary key (id_resena, id_usuario)
+);
+
+alter table public.resena_likes enable row level security;
+grant select, insert, delete on public.resena_likes to authenticated;
+grant select on public.resena_likes to anon;
+
+drop policy if exists "Cualquiera puede leer likes" on public.resena_likes;
+create policy "Cualquiera puede leer likes" on public.resena_likes for select using (true);
+
+drop policy if exists "Usuarios autenticados dan like" on public.resena_likes;
+create policy "Usuarios autenticados dan like" on public.resena_likes for insert with check (auth.uid() = id_usuario);
+
+drop policy if exists "Usuarios autenticados retiran su like" on public.resena_likes;
+create policy "Usuarios autenticados retiran su like" on public.resena_likes for delete using (auth.uid() = id_usuario);
+
+-- ============================================================
+-- 10. TABLA: resena_respuestas (Comentarios a otros comentarios)
+-- ============================================================
+create table if not exists public.resena_respuestas (
+    id_respuesta uuid primary key default gen_random_uuid(),
+    id_resena uuid not null references public.resenas(id_resena) on delete cascade,
+    id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
+    id_respuesta_padre uuid references public.resena_respuestas(id_respuesta) on delete cascade,
+    comentario text not null,
+    creado_el timestamptz default now()
+);
+
+alter table public.resena_respuestas
+    add column if not exists id_respuesta_padre uuid references public.resena_respuestas(id_respuesta) on delete cascade;
+
+alter table public.resena_respuestas enable row level security;
+grant select, insert, delete on public.resena_respuestas to authenticated;
+grant select on public.resena_respuestas to anon;
+
+drop policy if exists "Cualquiera puede leer respuestas a comentarios" on public.resena_respuestas;
+create policy "Cualquiera puede leer respuestas a comentarios" on public.resena_respuestas for select using (true);
+
+drop policy if exists "Usuarios autenticados pueden responder" on public.resena_respuestas;
+create policy "Usuarios autenticados pueden responder" on public.resena_respuestas for insert with check (auth.uid() = id_usuario);
+
+drop policy if exists "Autores o moderadores pueden eliminar respuestas" on public.resena_respuestas;
+create policy "Autores o moderadores pueden eliminar respuestas" on public.resena_respuestas for delete using (auth.uid() = id_usuario or public.is_moderator());
+
+create table if not exists public.respuesta_likes (
+    id_respuesta uuid not null references public.resena_respuestas(id_respuesta) on delete cascade,
+    id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
+    creado_el timestamptz default now(),
+    primary key (id_respuesta, id_usuario)
+);
+
+alter table public.respuesta_likes enable row level security;
+grant select, insert, delete on public.respuesta_likes to authenticated;
+grant select on public.respuesta_likes to anon;
+
+drop policy if exists "Cualquiera puede leer likes de respuestas" on public.respuesta_likes;
+create policy "Cualquiera puede leer likes de respuestas" on public.respuesta_likes for select using (true);
+
+drop policy if exists "Usuarios autenticados dan like a respuestas" on public.respuesta_likes;
+create policy "Usuarios autenticados dan like a respuestas" on public.respuesta_likes for insert with check (auth.uid() = id_usuario);
+
+drop policy if exists "Usuarios autenticados retiran su like de respuestas" on public.respuesta_likes;
+create policy "Usuarios autenticados retiran su like de respuestas" on public.respuesta_likes for delete using (auth.uid() = id_usuario);
+
+-- ============================================================
+-- 11. TABLA: notificaciones (Centro de notificaciones de usuario)
+-- ============================================================
+create table if not exists public.notificaciones (
+    id_notificacion uuid primary key default gen_random_uuid(),
+    id_usuario uuid not null,
+    tipo text not null check (tipo in ('like', 'respuesta', 'moderacion', 'sistema')),
+    titulo text not null,
+    mensaje text not null,
+    leida boolean not null default false,
+    isbn text,
+    id_resena uuid,
+    creado_el timestamptz default now()
+);
+
+-- Si la tabla ya existía con restricciones de clave foránea que pudieran abortar inserciones, las removemos
+alter table public.notificaciones drop constraint if exists notificaciones_isbn_fkey;
+alter table public.notificaciones drop constraint if exists notificaciones_id_resena_fkey;
+alter table public.notificaciones drop constraint if exists notificaciones_id_usuario_fkey;
+
+alter table public.notificaciones enable row level security;
+alter table public.notificaciones replica identity full;
+
+grant all on public.notificaciones to authenticated;
+grant all on public.notificaciones to anon;
+grant all on public.notificaciones to service_role;
+
+drop policy if exists "Usuarios ven sus propias notificaciones" on public.notificaciones;
+create policy "Usuarios ven sus propias notificaciones" on public.notificaciones for select using (auth.uid() = id_usuario or auth.uid() is null);
+
+drop policy if exists "Usuarios actualizan sus notificaciones" on public.notificaciones;
+create policy "Usuarios actualizan sus notificaciones" on public.notificaciones for update using (auth.uid() = id_usuario);
+
+drop policy if exists "Usuarios eliminan sus notificaciones" on public.notificaciones;
+create policy "Usuarios eliminan sus notificaciones" on public.notificaciones for delete using (auth.uid() = id_usuario);
+
+drop policy if exists "Usuarios o sistema insertan notificaciones" on public.notificaciones;
+create policy "Usuarios o sistema insertan notificaciones" on public.notificaciones for insert with check (true);
+
+-- ============================================================
+-- 12. TRIGGERS AUTOMÁTICOS EN SUPABASE PARA NOTIFICACIONES
+-- ============================================================
+
+-- 1. Trigger para LIKE en reseña principal
+create or replace function public.tr_notif_resena_like()
+returns trigger as $$
+declare
+    v_target_user uuid;
+    v_isbn text;
+    v_titulo text;
+    v_liker_name text;
+begin
+    select r.id_usuario, r.isbn, coalesce(l.titulo, 'una obra'), coalesce(u.nombre_usuario, 'Un lector')
+    into v_target_user, v_isbn, v_titulo, v_liker_name
+    from public.resenas r
+    left join public.libros l on l.isbn = r.isbn
+    left join public.usuario u on u.id_usuario = new.id_usuario
+    where r.id_resena = new.id_resena;
+
+    if v_target_user is not null and v_target_user <> new.id_usuario then
+        insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+        values (
+            v_target_user,
+            'like',
+            'Nuevo me gusta en tu reseña',
+            'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu reseña en "' || v_titulo || '".',
+            v_isbn,
+            new.id_resena
+        );
+    end if;
+    return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists tr_on_resena_like on public.resena_likes;
+create trigger tr_on_resena_like
+    after insert on public.resena_likes
+    for each row execute function public.tr_notif_resena_like();
+
+-- 2. Trigger para RESPUESTAS (comentar reseña o responder a un comentario)
+create or replace function public.tr_notif_resena_respuesta()
+returns trigger as $$
+declare
+    v_review_user uuid;
+    v_parent_user uuid;
+    v_isbn text;
+    v_titulo text;
+    v_author_name text;
+begin
+    select r.id_usuario, r.isbn, coalesce(l.titulo, 'una obra'), coalesce(u.nombre_usuario, 'Un lector')
+    into v_review_user, v_isbn, v_titulo, v_author_name
+    from public.resenas r
+    left join public.libros l on l.isbn = r.isbn
+    left join public.usuario u on u.id_usuario = new.id_usuario
+    where r.id_resena = new.id_resena;
+
+    -- Si es respuesta anidada a un comentario padre
+    if new.id_respuesta_padre is not null then
+        select id_usuario into v_parent_user
+        from public.resena_respuestas
+        where id_respuesta = new.id_respuesta_padre;
+
+        -- Notificar al autor del comentario padre
+        if v_parent_user is not null and v_parent_user <> new.id_usuario then
+            insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+            values (
+                v_parent_user,
+                'respuesta',
+                'Nueva respuesta a tu comentario',
+                v_author_name || ' respondió a tu comentario en "' || v_titulo || '": "' || 
+                case when length(new.comentario) > 60 then substring(new.comentario from 1 for 60) || '...' else new.comentario end || '"',
+                v_isbn,
+                new.id_resena
+            );
+        end if;
+
+        -- Notificar al autor de la reseña original si no es el mismo
+        if v_review_user is not null and v_review_user <> new.id_usuario and v_review_user <> v_parent_user then
+            insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+            values (
+                v_review_user,
+                'respuesta',
+                'Nuevo comentario en tu reseña',
+                v_author_name || ' comentó en el hilo de "' || v_titulo || '".',
+                v_isbn,
+                new.id_resena
+            );
+        end if;
+    else
+        -- Respuesta directa a la reseña original
+        if v_review_user is not null and v_review_user <> new.id_usuario then
+            insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+            values (
+                v_review_user,
+                'respuesta',
+                'Nueva respuesta a tu reseña',
+                v_author_name || ' respondió a tu opinión en "' || v_titulo || '": "' || 
+                case when length(new.comentario) > 60 then substring(new.comentario from 1 for 60) || '...' else new.comentario end || '"',
+                v_isbn,
+                new.id_resena
+            );
+        end if;
+    end if;
+
+    return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists tr_on_resena_respuesta on public.resena_respuestas;
+create trigger tr_on_resena_respuesta
+    after insert on public.resena_respuestas
+    for each row execute function public.tr_notif_resena_respuesta();
+
+-- 3. Trigger para LIKE en respuesta secundaria (comentario de comentario)
+create or replace function public.tr_notif_respuesta_like()
+returns trigger as $$
+declare
+    v_reply_user uuid;
+    v_resena_id uuid;
+    v_isbn text;
+    v_titulo text;
+    v_liker_name text;
+begin
+    select resp.id_usuario, resp.id_resena, r.isbn, coalesce(l.titulo, 'una obra'), coalesce(u.nombre_usuario, 'Un lector')
+    into v_reply_user, v_resena_id, v_isbn, v_titulo, v_liker_name
+    from public.resena_respuestas resp
+    join public.resenas r on r.id_resena = resp.id_resena
+    left join public.libros l on l.isbn = r.isbn
+    left join public.usuario u on u.id_usuario = new.id_usuario
+    where resp.id_respuesta = new.id_respuesta;
+
+    if v_reply_user is not null and v_reply_user <> new.id_usuario then
+        insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+        values (
+            v_reply_user,
+            'like',
+            'Nuevo me gusta en tu comentario',
+            'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu comentario en "' || v_titulo || '".',
+            v_isbn,
+            v_resena_id
+        );
+    end if;
+    return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists tr_on_respuesta_like on public.respuesta_likes;
+create trigger tr_on_respuesta_like
+    after insert on public.respuesta_likes
+    for each row execute function public.tr_notif_respuesta_like();
+
+-- Habilitar réplica en tiempo real (Supabase Realtime) para la tabla de notificaciones
+do $$
+begin
+    if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+        alter publication supabase_realtime add table public.notificaciones;
+    end if;
+exception
+    when duplicate_object then null;
+end;
+$$;
