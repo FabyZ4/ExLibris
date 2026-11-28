@@ -1,5 +1,5 @@
-import { ExLibrisMetrics } from '@/constants/theme';
 import type { ThemeColors } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
 import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { NotificationItem, useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -259,7 +259,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                 </View>
                 <Text style={styles.emptyTitle}>Bandeja sin notificaciones</Text>
                 <Text style={styles.emptySubtitle}>
-                  Te avisaremos aquí cuando otros lectores den like a tus comentarios, respondan a tus opiniones o cuando haya avisos de moderación.
+                  Te avisaremos aquí cuando otros lectores den like a tus comentarios o respondan a tus opiniones.
                 </Text>
               </View>
             }
