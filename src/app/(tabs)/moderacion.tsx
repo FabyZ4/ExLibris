@@ -12,9 +12,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { useExLibris, ModerationReport } from '@/store/ExLibrisContext';
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 
 export default function ModeracionScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
   const {
     userRole,
@@ -32,7 +35,7 @@ export default function ModeracionScreen() {
         <AppHeader subtitle="Acceso Restringido" />
         <View style={styles.accessDeniedBox}>
           <View style={styles.lockIconCircle}>
-            <Ionicons name="lock-closed" size={48} color={ExLibrisColors.primary} />
+            <Ionicons name="lock-closed" size={48} color={colors.primary} />
           </View>
           <Text style={styles.accessDeniedTitle}>Panel Restringido</Text>
           <Text style={styles.accessDeniedText}>
@@ -99,7 +102,7 @@ export default function ModeracionScreen() {
         <View style={styles.metricsRow}>
           <View style={styles.metricCard}>
             <View style={styles.metricHeader}>
-              <Ionicons name="warning-outline" size={14} color={ExLibrisColors.danger} />
+              <Ionicons name="warning-outline" size={14} color={colors.danger} />
               <Text style={styles.metricLabelRed}>Pendientes</Text>
             </View>
             <Text style={styles.metricValue}>{metricasModeracion.pendientes}</Text>
@@ -108,7 +111,7 @@ export default function ModeracionScreen() {
 
           <View style={styles.metricCard}>
             <View style={styles.metricHeader}>
-              <Ionicons name="checkmark-done" size={14} color={ExLibrisColors.moderator} />
+              <Ionicons name="checkmark-done" size={14} color={colors.moderator} />
               <Text style={styles.metricLabelGreen}>Aprobados</Text>
             </View>
             <Text style={styles.metricValue}>{metricasModeracion.aprobadosHoy}</Text>
@@ -125,7 +128,7 @@ export default function ModeracionScreen() {
             <Ionicons
               name="alert-circle-outline"
               size={14}
-              color={activeTab === 'reportados' ? '#FFFFFF' : ExLibrisColors.textSecondary}
+              color={activeTab === 'reportados' ? '#FFFFFF' : colors.textSecondary}
             />
             <Text
               style={[styles.tabButtonText, activeTab === 'reportados' && styles.tabButtonTextActive]}
@@ -141,7 +144,7 @@ export default function ModeracionScreen() {
             <Ionicons
               name="time-outline"
               size={14}
-              color={activeTab === 'feed' ? '#FFFFFF' : ExLibrisColors.textSecondary}
+              color={activeTab === 'feed' ? '#FFFFFF' : colors.textSecondary}
             />
             <Text
               style={[styles.tabButtonText, activeTab === 'feed' && styles.tabButtonTextActive]}
@@ -161,7 +164,7 @@ export default function ModeracionScreen() {
 
             {reportesPendientes.length === 0 ? (
               <View style={styles.allCleanCard}>
-                <Ionicons name="checkmark-circle-outline" size={42} color={ExLibrisColors.moderator} />
+                <Ionicons name="checkmark-circle-outline" size={42} color={colors.moderator} />
                 <Text style={styles.allCleanTitle}>Comunidad en orden</Text>
                 <Text style={styles.allCleanSub}>
                   No hay comentarios reportados pendientes de auditoría en este momento.
@@ -173,7 +176,7 @@ export default function ModeracionScreen() {
                   {/* Fila usuario infractor y obra */}
                   <View style={styles.reportCardTop}>
                     <View style={styles.infractorUserRow}>
-                      <Ionicons name="person-circle-outline" size={32} color={ExLibrisColors.danger} />
+                      <Ionicons name="person-circle-outline" size={32} color={colors.danger} />
                       <View>
                         <View style={styles.userNameBadgeRow}>
                           <Text style={styles.infractorName}>{reporte.usuario_infractor}</Text>
@@ -182,7 +185,8 @@ export default function ModeracionScreen() {
                           </View>
                         </View>
                         <Text style={styles.obraText}>
-                          Obra: <Text style={{ fontWeight: '700' }}>{reporte.titulo_obra}</Text>
+                          {reporte.tipo_comentario === 'respuesta' ? 'Respuesta en: ' : 'Reseña de: '}
+                          <Text style={{ fontWeight: '700' }}>{reporte.titulo_obra}</Text>
                         </Text>
                       </View>
                     </View>
@@ -191,13 +195,14 @@ export default function ModeracionScreen() {
 
                   {/* Causa del reporte */}
                   <View style={styles.causaBox}>
-                    <Ionicons name="alert-circle-outline" size={14} color={ExLibrisColors.danger} />
+                    <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
                     <Text style={styles.causaText}>Causa: {reporte.motivo}</Text>
                   </View>
 
                   {/* Texto del comentario */}
                   <View style={styles.commentQuoteBox}>
                     <Text style={styles.commentQuoteText}>
+                      {reporte.tipo_comentario === 'respuesta' ? 'Respuesta: ' : 'Reseña: '}
                       &ldquo;{reporte.comentario}&rdquo;
                     </Text>
                   </View>
@@ -208,7 +213,7 @@ export default function ModeracionScreen() {
                       style={styles.btnConservar}
                       onPress={() => handleConservar(reporte)}
                     >
-                      <Ionicons name="checkmark-circle-outline" size={16} color={ExLibrisColors.text} />
+                      <Ionicons name="checkmark-circle-outline" size={16} color={colors.text} />
                       <Text style={styles.btnConservarText}>Conservar</Text>
                     </Pressable>
 
@@ -249,10 +254,10 @@ export default function ModeracionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
@@ -262,7 +267,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ExLibrisColors.moderator,
+    backgroundColor: colors.moderator,
     paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: ExLibrisMetrics.radiusSm,
@@ -285,7 +290,7 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -293,12 +298,12 @@ const styles = StyleSheet.create({
   accessDeniedTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginBottom: 10,
   },
   accessDeniedText: {
     fontSize: 13,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 24,
@@ -307,7 +312,7 @@ const styles = StyleSheet.create({
   btnVolverBiblioteca: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: ExLibrisMetrics.radiusPill,
@@ -321,7 +326,7 @@ const styles = StyleSheet.create({
   sectionHeading: {
     fontSize: 16,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginTop: 14,
     marginBottom: 8,
   },
@@ -332,11 +337,11 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     padding: 12,
     borderRadius: ExLibrisMetrics.radiusMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   metricHeader: {
     flexDirection: 'row',
@@ -346,26 +351,26 @@ const styles = StyleSheet.create({
   metricLabelRed: {
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.danger,
+    color: colors.danger,
   },
   metricLabelGreen: {
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
   },
   metricValue: {
     fontSize: 26,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginVertical: 4,
   },
   metricSub: {
     fontSize: 10,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   tabsRow: {
     flexDirection: 'row',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     padding: 4,
     borderRadius: ExLibrisMetrics.radiusPill,
     gap: 4,
@@ -381,12 +386,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tabButtonActive: {
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
   },
   tabButtonText: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   tabButtonTextActive: {
     color: '#FFFFFF',
@@ -403,39 +408,39 @@ const styles = StyleSheet.create({
   subHeading: {
     fontSize: 13,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   priorityTag: {
     fontSize: 10,
     fontWeight: '600',
-    color: ExLibrisColors.danger,
+    color: colors.danger,
   },
   allCleanCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 24,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   allCleanTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
     marginTop: 8,
   },
   allCleanSub: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 4,
   },
   reportCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 12,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -456,14 +461,14 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: ExLibrisColors.dangerLight,
+    backgroundColor: colors.dangerLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   infractorInitial: {
     fontSize: 11,
     fontWeight: '800',
-    color: ExLibrisColors.danger,
+    color: colors.danger,
   },
   userNameBadgeRow: {
     flexDirection: 'row',
@@ -473,10 +478,10 @@ const styles = StyleSheet.create({
   infractorName: {
     fontSize: 12,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   infractorBadge: {
-    backgroundColor: ExLibrisColors.dangerLight,
+    backgroundColor: colors.dangerLight,
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 4,
@@ -484,21 +489,21 @@ const styles = StyleSheet.create({
   infractorBadgeText: {
     fontSize: 9,
     fontWeight: '700',
-    color: ExLibrisColors.danger,
+    color: colors.danger,
   },
   obraText: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   reportTimestamp: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   causaBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -508,12 +513,12 @@ const styles = StyleSheet.create({
   causaText: {
     fontSize: 10,
     fontWeight: '600',
-    color: ExLibrisColors.danger,
+    color: colors.danger,
   },
   commentQuoteBox: {
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderLeftWidth: 3,
-    borderLeftColor: ExLibrisColors.danger,
+    borderLeftColor: colors.danger,
     padding: 8,
     borderRadius: 4,
     marginBottom: 12,
@@ -521,7 +526,7 @@ const styles = StyleSheet.create({
   commentQuoteText: {
     fontSize: 11,
     fontStyle: 'italic',
-    color: ExLibrisColors.text,
+    color: colors.text,
     lineHeight: 16,
   },
   actionsRow: {
@@ -535,15 +540,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 9,
     borderRadius: ExLibrisMetrics.radiusSm,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
     gap: 6,
   },
   btnConservarText: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   btnEliminar: {
     flex: 1.3,
@@ -552,7 +557,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 9,
     borderRadius: ExLibrisMetrics.radiusSm,
-    backgroundColor: ExLibrisColors.danger,
+    backgroundColor: colors.danger,
     gap: 6,
   },
   btnEliminarText: {
@@ -564,11 +569,11 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   feedItem: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     padding: 10,
     borderRadius: ExLibrisMetrics.radiusSm,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   feedHeader: {
     flexDirection: 'row',
@@ -578,20 +583,20 @@ const styles = StyleSheet.create({
   feedUser: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   feedBook: {
     fontSize: 11,
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     fontStyle: 'italic',
   },
   feedText: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   feedTime: {
     fontSize: 9,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
 });

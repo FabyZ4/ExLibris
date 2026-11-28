@@ -7,10 +7,12 @@ import {
 import { UserProfile } from '@/types/auth.types';
 import { NotificationItem } from '@/types/notification.types';
 import { mapNotificaciones } from '@/utils/mappers';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
 export const useNotificacionesState = (currentUser: UserProfile | null) => {
   const [notificaciones, setNotificaciones] = useState<NotificationItem[]>([]);
+  const channelRef = useRef<any>(null);
 
   const notificacionesNoLeidasCount = useMemo(
     () => notificaciones.filter(n => !n.leida).length,
@@ -29,34 +31,57 @@ export const useNotificacionesState = (currentUser: UserProfile | null) => {
     }
   }, [currentUser]);
 
-  // Subscripción en tiempo real a notificaciones en Supabase y sondeo periódico
+  // Subscripción en tiempo real con auto-reconexión ante cambios de estado de la app
   useEffect(() => {
     if (!currentUser || currentUser.id.startsWith('demo-')) return;
 
-    const channel = supabase
-      .channel(`notificaciones-live:${currentUser.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'notificaciones',
-        },
-        (payload: any) => {
-          if (!payload.new || payload.new.id_usuario === currentUser.id) {
+    const setupSubscription = () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+
+      channelRef.current = supabase
+        .channel(`notificaciones-live:${currentUser.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notificaciones',
+          },
+          (payload: any) => {
+            if (!payload.new || payload.new.id_usuario === currentUser.id) {
+              sincronizarNotificaciones();
+            }
+          }
+        )
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
             sincronizarNotificaciones();
           }
-        }
-      )
-      .subscribe();
+        });
+    };
 
-    const interval = setInterval(() => {
-      sincronizarNotificaciones();
-    }, 8000);
+    setupSubscription();
+
+    // Reconectar socket y resincronizar cuando la aplicación vuelve de background
+    const handleAppState = (state: AppStateStatus) => {
+      if (state === 'active') {
+        setupSubscription();
+        sincronizarNotificaciones();
+      }
+    };
+
+    const appStateSub = AppState.addEventListener('change', handleAppState);
+    const interval = setInterval(sincronizarNotificaciones, 10000);
 
     return () => {
+      appStateSub.remove();
       clearInterval(interval);
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [currentUser, sincronizarNotificaciones]);
 

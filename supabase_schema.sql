@@ -33,8 +33,13 @@ create table if not exists public.libros (
     autor text not null,
     sinopsis text,
     portada_url text,
-    total_paginas integer not null check (total_paginas > 0)
+    total_paginas integer not null check (total_paginas > 0),
+    editorial text,
+    anio integer
 );
+
+alter table public.libros add column if not exists editorial text;
+alter table public.libros add column if not exists anio integer;
 
 -- 5. TABLA: biblioteca_usuario (Inventario personal y Bitácora de Compra)
 create table if not exists public.biblioteca_usuario (
@@ -66,12 +71,56 @@ create table if not exists public.resenas (
 create table if not exists public.reportes (
     id_reporte uuid primary key default gen_random_uuid(),
     id_resena uuid not null references public.resenas(id_resena) on delete cascade,
+    id_respuesta uuid,
     id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
     motivo text not null,
+    tipo_comentario text not null default 'resena',
     estado text not null default 'pendiente' check (estado in ('pendiente', 'descartado', 'atendido')),
     creado_el timestamptz default now(),
+    revisado_el timestamptz,
+    constraint reportes_tipo_comentario_check check (tipo_comentario in ('resena', 'respuesta'))
+);
+
+create table if not exists public.solicitudes_libro (
+    id_solicitud uuid primary key default gen_random_uuid(),
+    id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
+    id_libro varchar(20) references public.libros(isbn),
+    isbn varchar(20) not null,
+    tipo text not null check (tipo in ('nuevo', 'actualizacion')),
+    datos_propuestos jsonb not null check (jsonb_typeof(datos_propuestos) = 'object'),
+    estado text not null default 'pendiente' check (estado in ('pendiente', 'aprobada', 'rechazada')),
+    id_moderador uuid references public.usuario(id_usuario) on delete set null,
+    nota_moderador text,
+    creado_el timestamptz not null default now(),
+    revisado_el timestamptz,
+    check (
+        (tipo = 'nuevo' and id_libro is null)
+        or (tipo = 'actualizacion' and id_libro is not null and id_libro = isbn)
+    )
+);
+
+create unique index if not exists solicitudes_libro_una_pendiente_por_usuario
+    on public.solicitudes_libro (id_usuario, isbn)
+    where estado = 'pendiente';
+
+create index if not exists solicitudes_libro_pendientes_fecha
+    on public.solicitudes_libro (creado_el desc)
+    where estado = 'pendiente';
+
+create table if not exists public.contacto_app (
+    id_contacto uuid primary key default gen_random_uuid(),
+    id_usuario uuid not null references public.usuario(id_usuario) on delete cascade,
+    tipo text not null check (tipo in ('recomendacion', 'queja', 'mejora')),
+    mensaje text not null check (length(trim(mensaje)) between 10 and 2000),
+    estado text not null default 'pendiente' check (estado in ('pendiente', 'atendido')),
+    id_moderador uuid references public.usuario(id_usuario) on delete set null,
+    creado_el timestamptz not null default now(),
     revisado_el timestamptz
 );
+
+create index if not exists contacto_app_pendientes_fecha
+    on public.contacto_app (creado_el asc)
+    where estado = 'pendiente';
 
 -- 8. TABLA: categorias (Catálogo administrable desde Supabase)
 create table if not exists public.categorias (
@@ -119,6 +168,8 @@ alter table public.libros enable row level security;
 alter table public.biblioteca_usuario enable row level security;
 alter table public.resenas enable row level security;
 alter table public.reportes enable row level security;
+alter table public.solicitudes_libro enable row level security;
+alter table public.contacto_app enable row level security;
 alter table public.categorias enable row level security;
 alter table public.libro_categorias enable row level security;
 
@@ -204,6 +255,7 @@ create policy "Administradores eliminan relaciones de categorías"
     using (public.is_moderator());
 
 -- Políticas para 'usuario'
+grant update (nombre_usuario) on public.usuario to authenticated;
 create policy "Usuarios pueden ver perfiles" on public.usuario for select using (true);
 create policy "Usuarios editan su propio perfil" on public.usuario for update using (auth.uid() = id_usuario);
 
@@ -240,6 +292,233 @@ create policy "Solo moderadores auditan reportes"
 create policy "Solo moderadores actualizan estado de reportes" 
     on public.reportes for update using (public.is_moderator());
 
+-- Políticas para las solicitudes de incorporación y actualización de libros
+grant select, insert on public.solicitudes_libro to authenticated;
+
+drop policy if exists "Lectores ven sus solicitudes y moderadores todas" on public.solicitudes_libro;
+create policy "Lectores ven sus solicitudes y moderadores todas"
+    on public.solicitudes_libro for select
+    to authenticated
+    using (auth.uid() = id_usuario or public.is_moderator());
+
+drop policy if exists "Lectores envían solicitudes propias pendientes" on public.solicitudes_libro;
+create policy "Lectores envían solicitudes propias pendientes"
+    on public.solicitudes_libro for insert
+    to authenticated
+    with check (
+        auth.uid() = id_usuario
+        and estado = 'pendiente'
+        and id_moderador is null
+        and revisado_el is null
+    );
+
+grant select, insert, update on public.contacto_app to authenticated;
+
+drop policy if exists "Usuarios ven sus mensajes y moderadores todos" on public.contacto_app;
+create policy "Usuarios ven sus mensajes y moderadores todos"
+    on public.contacto_app for select
+    to authenticated
+    using (auth.uid() = id_usuario or public.is_moderator());
+
+drop policy if exists "Usuarios envían mensajes propios pendientes" on public.contacto_app;
+create policy "Usuarios envían mensajes propios pendientes"
+    on public.contacto_app for insert
+    to authenticated
+    with check (
+        auth.uid() = id_usuario
+        and estado = 'pendiente'
+        and id_moderador is null
+        and revisado_el is null
+    );
+
+drop policy if exists "Moderadores actualizan mensajes de contacto" on public.contacto_app;
+create policy "Moderadores actualizan mensajes de contacto"
+    on public.contacto_app for update
+    to authenticated
+    using (public.is_moderator())
+    with check (public.is_moderator());
+
+create or replace function public.resolver_contacto_app(p_id_contacto uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if not public.is_moderator() then
+        raise exception 'Solo moderadores pueden atender mensajes de contacto';
+    end if;
+
+    update public.contacto_app
+    set estado = 'atendido',
+        id_moderador = auth.uid(),
+        revisado_el = now()
+    where id_contacto = p_id_contacto
+      and estado = 'pendiente';
+
+    if not found then
+        raise exception 'El mensaje no existe o ya fue atendido';
+    end if;
+end;
+$$;
+
+revoke all on function public.resolver_contacto_app(uuid) from public;
+grant execute on function public.resolver_contacto_app(uuid) to authenticated;
+
+create or replace function public.revisar_solicitud_libro(
+    p_id_solicitud uuid,
+    p_accion text,
+    p_campos_aprobados text[] default '{}',
+    p_nota text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_solicitud public.solicitudes_libro%rowtype;
+    v_categoria text;
+    v_titulo text;
+    v_autor text;
+    v_paginas integer;
+    v_anio integer;
+begin
+    if not public.is_moderator() then
+        raise exception 'Solo moderadores pueden revisar solicitudes de libros';
+    end if;
+
+    if p_accion is null or p_accion not in ('aprobar', 'rechazar') then
+        raise exception 'Acción de moderación inválida';
+    end if;
+
+    select *
+    into v_solicitud
+    from public.solicitudes_libro
+    where id_solicitud = p_id_solicitud
+    for update;
+
+    if not found or v_solicitud.estado <> 'pendiente' then
+        raise exception 'La solicitud no existe o ya fue revisada';
+    end if;
+
+    if p_accion = 'rechazar' then
+        update public.solicitudes_libro
+        set estado = 'rechazada',
+            id_moderador = auth.uid(),
+            nota_moderador = nullif(trim(p_nota), ''),
+            revisado_el = now()
+        where id_solicitud = p_id_solicitud;
+        return;
+    end if;
+
+    if coalesce(cardinality(p_campos_aprobados), 0) = 0
+       or exists (
+           select 1
+           from unnest(p_campos_aprobados) campo
+           where campo not in ('titulo', 'autor', 'editorial', 'anio', 'total_paginas', 'sinopsis', 'portada_url', 'categorias')
+       ) then
+        raise exception 'Selecciona campos válidos para aplicar';
+    end if;
+
+    if 'total_paginas' = any(p_campos_aprobados) then
+        if coalesce(v_solicitud.datos_propuestos->>'total_paginas', '') !~ '^[1-9][0-9]*$' then
+            raise exception 'La cantidad de páginas propuesta no es válida';
+        end if;
+        v_paginas := (v_solicitud.datos_propuestos->>'total_paginas')::integer;
+    end if;
+
+    if 'anio' = any(p_campos_aprobados) then
+        if coalesce(v_solicitud.datos_propuestos->>'anio', '') !~ '^[0-9]{4}$' then
+            raise exception 'El año propuesto no es válido';
+        end if;
+        v_anio := (v_solicitud.datos_propuestos->>'anio')::integer;
+    end if;
+
+    if 'portada_url' = any(p_campos_aprobados)
+       and coalesce(v_solicitud.datos_propuestos->>'portada_url', '') !~* '^https://[^[:space:]]+$' then
+        raise exception 'La URL de portada debe usar HTTPS';
+    end if;
+
+    if 'categorias' = any(p_campos_aprobados) then
+        if coalesce(jsonb_typeof(v_solicitud.datos_propuestos->'id_categorias'), 'null') <> 'array' then
+            raise exception 'La lista de categorías propuesta no es válida';
+        end if;
+        for v_categoria in
+            select proposed_category.id_categoria
+            from jsonb_array_elements_text(v_solicitud.datos_propuestos->'id_categorias')
+                as proposed_category(id_categoria)
+        loop
+            if not exists (
+                select 1 from public.categorias where id_categoria::text = v_categoria
+            ) then
+                raise exception 'Una categoría propuesta ya no existe';
+            end if;
+        end loop;
+    end if;
+
+    if v_solicitud.tipo = 'nuevo' then
+        if not ('titulo' = any(p_campos_aprobados) and 'autor' = any(p_campos_aprobados)) then
+            raise exception 'Para incorporar un libro deben aprobarse el título y el autor';
+        end if;
+
+        v_titulo := nullif(trim(v_solicitud.datos_propuestos->>'titulo'), '');
+        v_autor := nullif(trim(v_solicitud.datos_propuestos->>'autor'), '');
+        if v_titulo is null or v_autor is null then
+            raise exception 'El título y el autor son obligatorios';
+        end if;
+
+        insert into public.libros (
+            isbn, titulo, autor, editorial, anio, sinopsis, portada_url, total_paginas
+        )
+        values (
+            v_solicitud.isbn,
+            v_titulo,
+            v_autor,
+            case when 'editorial' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'editorial'), '') end,
+            case when 'anio' = any(p_campos_aprobados) then v_anio end,
+            case when 'sinopsis' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'sinopsis'), '') end,
+            case when 'portada_url' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'portada_url'), '') end,
+            case when 'total_paginas' = any(p_campos_aprobados) then v_paginas else 250 end
+        );
+    else
+        update public.libros
+        set titulo = case when 'titulo' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'titulo'), '') else titulo end,
+            autor = case when 'autor' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'autor'), '') else autor end,
+            editorial = case when 'editorial' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'editorial'), '') else editorial end,
+            anio = case when 'anio' = any(p_campos_aprobados) then v_anio else anio end,
+            sinopsis = case when 'sinopsis' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'sinopsis'), '') else sinopsis end,
+            portada_url = case when 'portada_url' = any(p_campos_aprobados) then nullif(trim(v_solicitud.datos_propuestos->>'portada_url'), '') else portada_url end,
+            total_paginas = case when 'total_paginas' = any(p_campos_aprobados) then v_paginas else total_paginas end
+        where isbn = v_solicitud.id_libro;
+
+        if not found then
+            raise exception 'El libro asociado a la solicitud ya no existe';
+        end if;
+    end if;
+
+    if 'categorias' = any(p_campos_aprobados) then
+        delete from public.libro_categorias
+        where isbn = v_solicitud.isbn;
+
+        insert into public.libro_categorias (isbn, id_categoria)
+        select distinct v_solicitud.isbn, proposed_category.id_categoria::uuid
+        from jsonb_array_elements_text(v_solicitud.datos_propuestos->'id_categorias')
+            as proposed_category(id_categoria);
+    end if;
+
+    update public.solicitudes_libro
+    set estado = 'aprobada',
+        id_moderador = auth.uid(),
+        nota_moderador = nullif(trim(p_nota), ''),
+        revisado_el = now()
+    where id_solicitud = p_id_solicitud;
+end;
+$$;
+
+revoke all on function public.revisar_solicitud_libro(uuid, text, text[], text) from public;
+grant execute on function public.revisar_solicitud_libro(uuid, text, text[], text) to authenticated;
+
 -- ============================================================
 -- TRIGGER: Creación automática de perfil al registrarse en Auth
 -- ============================================================
@@ -265,6 +544,27 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
     after insert on auth.users
     for each row execute function public.handle_new_user();
+
+create or replace function public.sync_usuario_email()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if new.email is not null and new.email is distinct from old.email then
+        update public.usuario
+        set email = new.email
+        where id_usuario = new.id;
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_email_updated on auth.users;
+create trigger on_auth_user_email_updated
+    after update of email on auth.users
+    for each row execute function public.sync_usuario_email();
 
 -- ============================================================
 -- SEED DATA: Obras Literarias Iniciales del Proyecto ExLibris
@@ -387,6 +687,147 @@ create table if not exists public.resena_respuestas (
     creado_el timestamptz default now()
 );
 
+alter table public.reportes
+    add column if not exists id_respuesta uuid,
+    add column if not exists tipo_comentario text not null default 'resena';
+
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint
+        where conname = 'reportes_tipo_comentario_check'
+          and conrelid = 'public.reportes'::regclass
+    ) then
+        alter table public.reportes
+            add constraint reportes_tipo_comentario_check
+            check (tipo_comentario in ('resena', 'respuesta'));
+    end if;
+
+    if not exists (
+        select 1 from pg_constraint
+        where conname = 'reportes_id_respuesta_fkey'
+          and conrelid = 'public.reportes'::regclass
+    ) then
+        alter table public.reportes
+            add constraint reportes_id_respuesta_fkey
+            foreign key (id_respuesta)
+            references public.resena_respuestas(id_respuesta)
+            on delete set null;
+    end if;
+end;
+$$;
+
+drop policy if exists "Usuarios autenticados pueden enviar reportes" on public.reportes;
+create or replace function public.respuesta_pertenece_a_resena(
+    p_id_respuesta uuid,
+    p_id_resena uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+    select exists (
+        select 1
+        from public.resena_respuestas respuesta
+        where respuesta.id_respuesta = p_id_respuesta
+          and respuesta.id_resena = p_id_resena
+    );
+$$;
+
+revoke all on function public.respuesta_pertenece_a_resena(uuid, uuid) from public;
+grant execute on function public.respuesta_pertenece_a_resena(uuid, uuid) to authenticated;
+
+create policy "Usuarios autenticados pueden enviar reportes"
+    on public.reportes for insert
+    to authenticated
+    with check (
+        auth.uid() = id_usuario
+        and estado = 'pendiente'
+        and revisado_el is null
+        and (
+            (tipo_comentario = 'resena' and id_respuesta is null)
+            or (
+                tipo_comentario = 'respuesta'
+                and id_respuesta is not null
+                and public.respuesta_pertenece_a_resena(id_respuesta, id_resena)
+            )
+        )
+    );
+
+create or replace function public.crear_reporte_comentario(
+    p_id_resena uuid,
+    p_id_respuesta uuid,
+    p_motivo text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_id_usuario uuid := auth.uid();
+    v_id_usuario_objetivo uuid;
+    v_id_reporte uuid;
+begin
+    if v_id_usuario is null then
+        raise exception 'Inicia sesión para enviar un reporte.';
+    end if;
+
+    if nullif(pg_catalog.btrim(p_motivo), '') is null then
+        raise exception 'Selecciona un motivo para el reporte.';
+    end if;
+
+    if p_id_respuesta is null then
+        select resena.id_usuario
+        into v_id_usuario_objetivo
+        from public.resenas resena
+        where resena.id_resena = p_id_resena
+          and resena.estado = 'publicado';
+    else
+        select respuesta.id_usuario
+        into v_id_usuario_objetivo
+        from public.resena_respuestas respuesta
+        join public.resenas resena on resena.id_resena = respuesta.id_resena
+        where respuesta.id_respuesta = p_id_respuesta
+          and respuesta.id_resena = p_id_resena
+          and resena.estado = 'publicado';
+    end if;
+
+    if not found then
+        raise exception 'El comentario que intentas reportar ya no existe.';
+    end if;
+
+    if v_id_usuario_objetivo = v_id_usuario then
+        raise exception 'No puedes reportar tu propio comentario.';
+    end if;
+
+    insert into public.reportes (
+        id_resena,
+        id_respuesta,
+        id_usuario,
+        motivo,
+        tipo_comentario,
+        estado
+    )
+    values (
+        p_id_resena,
+        p_id_respuesta,
+        v_id_usuario,
+        pg_catalog.btrim(p_motivo),
+        case when p_id_respuesta is null then 'resena' else 'respuesta' end,
+        'pendiente'
+    )
+    returning id_reporte into v_id_reporte;
+
+    return v_id_reporte;
+end;
+$$;
+
+revoke all on function public.crear_reporte_comentario(uuid, uuid, text) from public;
+grant execute on function public.crear_reporte_comentario(uuid, uuid, text) to authenticated;
+
 alter table public.resena_respuestas
     add column if not exists id_respuesta_padre uuid references public.resena_respuestas(id_respuesta) on delete cascade;
 
@@ -402,6 +843,70 @@ create policy "Usuarios autenticados pueden responder" on public.resena_respuest
 
 drop policy if exists "Autores o moderadores pueden eliminar respuestas" on public.resena_respuestas;
 create policy "Autores o moderadores pueden eliminar respuestas" on public.resena_respuestas for delete using (auth.uid() = id_usuario or public.is_moderator());
+
+create or replace function public.resolver_reporte_moderacion(
+    p_id_reporte uuid,
+    p_accion text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_reporte public.reportes%rowtype;
+begin
+    if not public.is_moderator() then
+        raise exception 'Solo moderadores pueden resolver reportes';
+    end if;
+
+    if p_accion is null or p_accion not in ('conservar', 'eliminar') then
+        raise exception 'Acción de moderación inválida';
+    end if;
+
+    select *
+    into v_reporte
+    from public.reportes
+    where id_reporte = p_id_reporte
+    for update;
+
+    if not found or v_reporte.estado <> 'pendiente' then
+        raise exception 'El reporte no existe o ya fue revisado';
+    end if;
+
+    if p_accion = 'eliminar' then
+        if v_reporte.tipo_comentario = 'respuesta' then
+            if v_reporte.id_respuesta is null then
+                raise exception 'La respuesta reportada ya no existe';
+            end if;
+
+            delete from public.resena_respuestas
+            where id_respuesta = v_reporte.id_respuesta
+              and id_resena = v_reporte.id_resena;
+
+            if not found then
+                raise exception 'La respuesta reportada ya no existe';
+            end if;
+        else
+            update public.resenas
+            set estado = 'eliminado'
+            where id_resena = v_reporte.id_resena;
+
+            if not found then
+                raise exception 'El comentario reportado ya no existe';
+            end if;
+        end if;
+    end if;
+
+    update public.reportes
+    set estado = case when p_accion = 'conservar' then 'descartado' else 'atendido' end,
+        revisado_el = now()
+    where id_reporte = p_id_reporte;
+end;
+$$;
+
+revoke all on function public.resolver_reporte_moderacion(uuid, text) from public;
+grant execute on function public.resolver_reporte_moderacion(uuid, text) to authenticated;
 
 create table if not exists public.respuesta_likes (
     id_respuesta uuid not null references public.resena_respuestas(id_respuesta) on delete cascade,
@@ -462,6 +967,117 @@ create policy "Usuarios eliminan sus notificaciones" on public.notificaciones fo
 drop policy if exists "Usuarios o sistema insertan notificaciones" on public.notificaciones;
 create policy "Usuarios o sistema insertan notificaciones" on public.notificaciones for insert with check (true);
 
+create or replace function public.notificar_moderadores_revision(
+    p_titulo text,
+    p_mensaje text
+)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+    insert into public.notificaciones (id_usuario, tipo, titulo, mensaje)
+    select u.id_usuario, 'moderacion', p_titulo, p_mensaje
+    from public.usuario u
+    join public.rol r on r.id_rol = u.id_rol
+    where lower(trim(r.nombre_rol)) in ('moderador', 'admin', 'administrador');
+$$;
+
+revoke all on function public.notificar_moderadores_revision(text, text) from public;
+
+create or replace function public.tr_notificar_solicitud_libro_pendiente()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if new.estado = 'pendiente' then
+        perform public.notificar_moderadores_revision(
+            'Revisión pendiente: solicitud de libro',
+            'Hay una propuesta para el ISBN ' || new.isbn || ' que espera revisión.'
+        );
+    end if;
+    return new;
+end;
+$$;
+
+create or replace function public.tr_notificar_reporte_pendiente()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if new.estado = 'pendiente' then
+        perform public.notificar_moderadores_revision(
+            'Revisión pendiente: reporte comunitario',
+            'Un lector envió un reporte que espera revisión de moderación.'
+        );
+    end if;
+    return new;
+end;
+$$;
+
+create or replace function public.tr_notificar_contacto_pendiente()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_nombre text;
+begin
+    if new.estado = 'pendiente' then
+        select nombre_usuario into v_nombre
+        from public.usuario
+        where id_usuario = new.id_usuario;
+
+        perform public.notificar_moderadores_revision(
+            'Revisión pendiente: mensaje de contacto',
+            coalesce(v_nombre, 'Un lector') || ' envió una ' || new.tipo || ' para la aplicación.'
+        );
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists tr_notificar_solicitud_libro_moderadores on public.solicitudes_libro;
+create trigger tr_notificar_solicitud_libro_moderadores
+    after insert on public.solicitudes_libro
+    for each row execute function public.tr_notificar_solicitud_libro_pendiente();
+
+drop trigger if exists tr_notificar_reporte_moderadores on public.reportes;
+create trigger tr_notificar_reporte_moderadores
+    after insert on public.reportes
+    for each row execute function public.tr_notificar_reporte_pendiente();
+
+drop trigger if exists tr_notificar_contacto_moderadores on public.contacto_app;
+create trigger tr_notificar_contacto_moderadores
+    after insert on public.contacto_app
+    for each row execute function public.tr_notificar_contacto_pendiente();
+
+insert into public.notificaciones (id_usuario, tipo, titulo, mensaje)
+select u.id_usuario,
+       'moderacion',
+       'Revisión pendiente: pendientes existentes',
+       'Hay reportes, propuestas de libros o mensajes de contacto anteriores que esperan revisión.'
+from public.usuario u
+join public.rol r on r.id_rol = u.id_rol
+where lower(trim(r.nombre_rol)) in ('moderador', 'admin', 'administrador')
+  and (
+      exists (select 1 from public.reportes where estado = 'pendiente')
+      or exists (select 1 from public.solicitudes_libro where estado = 'pendiente')
+      or exists (select 1 from public.contacto_app where estado = 'pendiente')
+  )
+  and not exists (
+      select 1
+      from public.notificaciones n
+      where n.id_usuario = u.id_usuario
+        and n.tipo = 'moderacion'
+        and n.titulo = 'Revisión pendiente: pendientes existentes'
+  );
+
 -- ============================================================
 -- 12. TRIGGERS AUTOMÁTICOS EN SUPABASE PARA NOTIFICACIONES
 -- ============================================================
@@ -483,15 +1099,23 @@ begin
     where r.id_resena = new.id_resena;
 
     if v_target_user is not null and v_target_user <> new.id_usuario then
-        insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
-        values (
-            v_target_user,
-            'like',
-            'Nuevo me gusta en tu reseña',
-            'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu reseña en "' || v_titulo || '".',
-            v_isbn,
-            new.id_resena
-        );
+        if not exists (
+            select 1 from public.notificaciones
+            where id_usuario = v_target_user
+              and tipo = 'like'
+              and id_resena = new.id_resena
+              and creado_el >= now() - interval '1 minute'
+        ) then
+            insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+            values (
+                v_target_user,
+                'like',
+                'Nuevo me gusta en tu reseña',
+                'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu reseña en "' || v_titulo || '".',
+                v_isbn,
+                new.id_resena
+            );
+        end if;
     end if;
     return new;
 end;
@@ -595,15 +1219,23 @@ begin
     where resp.id_respuesta = new.id_respuesta;
 
     if v_reply_user is not null and v_reply_user <> new.id_usuario then
-        insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
-        values (
-            v_reply_user,
-            'like',
-            'Nuevo me gusta en tu comentario',
-            'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu comentario en "' || v_titulo || '".',
-            v_isbn,
-            v_resena_id
-        );
+        if not exists (
+            select 1 from public.notificaciones
+            where id_usuario = v_reply_user
+              and tipo = 'like'
+              and id_resena = v_resena_id
+              and creado_el >= now() - interval '1 minute'
+        ) then
+            insert into public.notificaciones (id_usuario, tipo, titulo, mensaje, isbn, id_resena)
+            values (
+                v_reply_user,
+                'like',
+                'Nuevo me gusta en tu comentario',
+                'A @' || lower(replace(v_liker_name, ' ', '_')) || ' le gustó tu comentario en "' || v_titulo || '".',
+                v_isbn,
+                v_resena_id
+            );
+        end if;
     end if;
     return new;
 end;

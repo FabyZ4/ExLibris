@@ -1,13 +1,15 @@
-import { ExLibrisColors } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
-  const { currentUser } = useExLibris();
+  const { colors, styles } = useExLibrisStyles(createStyles);
+  const { currentUser, revisionesPendientesCount } = useExLibris();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const tabBarHeight = 58 + insets.bottom;
@@ -23,8 +25,9 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: ExLibrisColors.primary,
-        tabBarInactiveTintColor: ExLibrisColors.textSecondary,
+        tabBarHideOnKeyboard: true,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: [styles.tabBar, { height: tabBarHeight, paddingBottom: insets.bottom + 4 }],
         tabBarLabelStyle: styles.tabBarLabel,
       }}
@@ -74,7 +77,10 @@ export default function TabLayout() {
         options={{
           title: 'Perfil',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person-circle' : 'person-circle-outline'} size={22} color={typeof color === 'string' ? color : undefined} />
+            <View style={styles.profileTabIcon}>
+              <Ionicons name={focused ? 'person-circle' : 'person-circle-outline'} size={22} color={typeof color === 'string' ? color : undefined} />
+              {revisionesPendientesCount > 0 && <View style={styles.profilePendingDot} />}
+            </View>
           ),
         }}
       />
@@ -90,10 +96,10 @@ export default function TabLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   tabBar: {
-    backgroundColor: ExLibrisColors.surface,
-    borderTopColor: ExLibrisColors.border,
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
     borderTopWidth: 1,
     height: 58,
     paddingTop: 4,
@@ -107,5 +113,22 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: -2,
+  },
+  profileTabIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profilePendingDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: colors.danger,
+    borderWidth: 1,
+    borderColor: colors.surface,
   },
 });

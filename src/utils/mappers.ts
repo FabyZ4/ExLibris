@@ -18,8 +18,8 @@ export const mapBibliotecaFromDb = (items: DbBibliotecaItemConLibro[]): Bibliote
     const libro: Book = {
       ...item.libros,
       categorias: item.libros.categorias || [],
-      editorial: 'Editorial canónica',
-      anio: 2024,
+      editorial: item.libros.editorial || 'Editorial canónica',
+      anio: item.libros.anio || 2024,
     };
     return [{
       id_biblioteca: item.id_biblioteca,

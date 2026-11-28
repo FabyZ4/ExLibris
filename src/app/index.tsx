@@ -1,4 +1,6 @@
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -18,6 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
   const { currentUser, iniciarSesion, registrarse } = useExLibris();
 
@@ -53,6 +56,11 @@ export default function LoginScreen() {
         if (res.success) {
           Alert.alert('¡Cuenta creada!', 'Bienvenido a ExLibris.');
           router.replace('/biblioteca');
+        } else if (res.needsEmailVerification) {
+          Alert.alert('Verifica tu correo', res.message);
+          setModoRegistro(false);
+        } else if (res.emailRateLimited) {
+          Alert.alert('Límite temporal de correo', res.message);
         } else if (res.needsLogin) {
           Alert.alert('Cuenta creada', res.message || 'Inicia sesión con tu correo y contraseña.');
           setModoRegistro(false);
@@ -77,7 +85,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardContainer}
       >
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -118,11 +126,11 @@ export default function LoginScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Nombre completo</Text>
                 <View style={styles.inputRow}>
-                  <Ionicons name="person-outline" size={18} color={ExLibrisColors.textSecondary} />
+                  <Ionicons name="person-outline" size={18} color={colors.textSecondary} />
                   <TextInput
                     style={styles.textInput}
                     placeholder="Ej. Fabiola Ramírez"
-                    placeholderTextColor={ExLibrisColors.textMuted}
+                    placeholderTextColor={colors.textMuted}
                     value={nombre}
                     onChangeText={setNombre}
                   />
@@ -133,11 +141,11 @@ export default function LoginScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Correo electrónico</Text>
               <View style={styles.inputRow}>
-                <Ionicons name="mail-outline" size={18} color={ExLibrisColors.textSecondary} />
+                <Ionicons name="mail-outline" size={18} color={colors.textSecondary} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="ejemplo@correo.com"
-                  placeholderTextColor={ExLibrisColors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={email}
@@ -149,11 +157,11 @@ export default function LoginScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Contraseña</Text>
               <View style={styles.inputRow}>
-                <Ionicons name="lock-closed-outline" size={18} color={ExLibrisColors.textSecondary} />
+                <Ionicons name="lock-closed-outline" size={18} color={colors.textSecondary} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="••••••••"
-                  placeholderTextColor={ExLibrisColors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   secureTextEntry
                   value={password}
                   onChangeText={setPassword}
@@ -184,10 +192,10 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   keyboardContainer: {
     flex: 1,
@@ -204,11 +212,11 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 20,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
-    shadowColor: ExLibrisColors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
@@ -217,24 +225,24 @@ const styles = StyleSheet.create({
   brandTitleBig: {
     fontSize: 28,
     fontWeight: '900',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     letterSpacing: 0.5,
   },
   brandSubtitle: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 4,
     maxWidth: 260,
   },
   tabSelector: {
     flexDirection: 'row',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     padding: 4,
     borderRadius: ExLibrisMetrics.radiusPill,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   tabButton: {
     flex: 1,
@@ -243,22 +251,22 @@ const styles = StyleSheet.create({
     borderRadius: ExLibrisMetrics.radiusPill,
   },
   tabButtonActive: {
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
   },
   tabText: {
     fontSize: 12,
     fontWeight: '700',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   tabTextActive: {
     color: '#FFFFFF',
   },
   formCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     padding: ExLibrisMetrics.spacingMd,
     borderRadius: ExLibrisMetrics.radiusMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -272,7 +280,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginBottom: 6,
     textTransform: 'uppercase',
   },
@@ -280,23 +288,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
     borderRadius: ExLibrisMetrics.radiusSm,
     paddingHorizontal: 12,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     gap: 8,
   },
   textInput: {
     flex: 1,
     paddingVertical: 10,
     fontSize: 13,
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   btnSubmit: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingVertical: 13,
     borderRadius: ExLibrisMetrics.radiusSm,
     gap: 8,

@@ -5,6 +5,9 @@ import {
   darLikeRespuestaDb,
   eliminarResenaPropia,
   eliminarRespuestaDb,
+  getLikesResenaDb,
+  getResenasFromDb,
+  getRespuestasResenaDb,
   quitarLikeResenaDb,
   quitarLikeRespuestaDb,
 } from '@/services/database.service';
@@ -12,6 +15,7 @@ import { UserProfile, UserRole } from '@/types/auth.types';
 import { Book, BookRatingStats } from '@/types/book.types';
 import { CommentReply, Review } from '@/types/community.types';
 import { findReply, removeReplyTree, updateReplyTree } from '@/utils/commentTree';
+import { mapResenasFromDb } from '@/utils/mappers';
 import { useCallback, useState } from 'react';
 
 export const useComunidadState = (
@@ -20,6 +24,38 @@ export const useComunidadState = (
   catalogo: Book[]
 ) => {
   const [resenas, setResenas] = useState<Review[]>([]);
+  const [cargandoMasResenas, setCargandoMasResenas] = useState(false);
+  const [hayMasResenas, setHayMasResenas] = useState(true);
+
+  const cargarMasResenas = useCallback(async (isbn?: string) => {
+    if (cargandoMasResenas || !hayMasResenas) return;
+    setCargandoMasResenas(true);
+    try {
+      const offset = resenas.length;
+      const [nuevasResenasDb, dbLikes, dbRespuestas] = await Promise.all([
+        getResenasFromDb(isbn, 20, offset),
+        getLikesResenaDb(isbn),
+        getRespuestasResenaDb(isbn),
+      ]);
+
+      if (!nuevasResenasDb || nuevasResenasDb.length < 20) {
+        setHayMasResenas(false);
+      }
+
+      if (nuevasResenasDb && nuevasResenasDb.length > 0) {
+        const mapped = mapResenasFromDb(nuevasResenasDb, dbLikes, dbRespuestas);
+        setResenas(prev => {
+          const idsExistentes = new Set(prev.map(r => r.id_resena));
+          const nuevas = mapped.filter(r => !idsExistentes.has(r.id_resena));
+          return [...prev, ...nuevas];
+        });
+      }
+    } catch (err) {
+      console.warn('Error cargando lote paginado de reseñas:', err);
+    } finally {
+      setCargandoMasResenas(false);
+    }
+  }, [cargandoMasResenas, hayMasResenas, resenas.length]);
 
   const publicarResena = useCallback(
     (isbn: string, calificacion: number, comentario: string) => {
@@ -194,14 +230,8 @@ export const useComunidadState = (
       if (!reply) return;
 
       const alreadyLiked = reply.likedBy?.includes(currentUser.id) || false;
-      if (!currentUser.id.startsWith('demo-') && !id_respuesta.startsWith('reply-')) {
-        if (alreadyLiked) {
-          await quitarLikeRespuestaDb(id_respuesta, currentUser.id);
-        } else {
-          await darLikeRespuestaDb(id_respuesta, currentUser.id);
-        }
-      }
 
+      // 1. Actualización optimista inmediata en UI
       setResenas(prev =>
         prev.map(item => {
           if (item.id_resena !== id_resena) return item;
@@ -221,6 +251,39 @@ export const useComunidadState = (
           };
         })
       );
+
+      // 2. Persistencia en Supabase
+      if (!currentUser.id.startsWith('demo-') && !id_respuesta.startsWith('reply-')) {
+        try {
+          if (alreadyLiked) {
+            await quitarLikeRespuestaDb(id_respuesta, currentUser.id);
+          } else {
+            await darLikeRespuestaDb(id_respuesta, currentUser.id);
+          }
+        } catch (err) {
+          // Revertir optimismo ante error real de red
+          setResenas(prev =>
+            prev.map(item => {
+              if (item.id_resena !== id_resena) return item;
+              return {
+                ...item,
+                respuestas: updateReplyTree(item.respuestas || [], id_respuesta, current => {
+                  const likedBy = current.likedBy || [];
+                  const liked = likedBy.includes(currentUser.id);
+                  return {
+                    ...current,
+                    likes: Math.max(0, (current.likes || 0) + (liked ? -1 : 1)),
+                    likedBy: liked
+                      ? likedBy.filter(userId => userId !== currentUser.id)
+                      : [...likedBy, currentUser.id],
+                  };
+                }),
+              };
+            })
+          );
+          throw err;
+        }
+      }
     },
     [currentUser, resenas]
   );
@@ -289,6 +352,9 @@ export const useComunidadState = (
   return {
     resenas,
     setResenas,
+    cargandoMasResenas,
+    hayMasResenas,
+    cargarMasResenas,
     publicarResena,
     eliminarResenaPropia: eliminarResenaPropiaContext,
     darLikeResena,

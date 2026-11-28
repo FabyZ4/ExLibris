@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ExLibrisColors } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 
 interface StarRatingProps {
   rating: number; // 1 a 5
@@ -18,6 +19,7 @@ export const StarRating: React.FC<StarRatingProps> = ({
   onRate,
   interactive = false,
 }) => {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const stars = [];
 
   for (let i = 1; i <= maxStars; i++) {
@@ -33,7 +35,7 @@ export const StarRating: React.FC<StarRatingProps> = ({
         key={i}
         name={iconName}
         size={size}
-        color={iconName !== 'star-outline' ? ExLibrisColors.gold : ExLibrisColors.borderDark}
+        color={iconName !== 'star-outline' ? colors.gold : colors.borderDark}
         style={styles.star}
       />
     );
@@ -52,7 +54,7 @@ export const StarRating: React.FC<StarRatingProps> = ({
   return <View style={styles.container}>{stars}</View>;
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',

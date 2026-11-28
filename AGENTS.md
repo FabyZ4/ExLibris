@@ -39,3 +39,10 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## Directives de Comunicación y Crítica Técnica
+
+1. **Verdad Técnica Absoluta**: Señala sin rodeos lo que está roto, frágil, mal optimizado o con deuda técnica.
+2. **Cero Relleno & Ahorro de Tokens**: Directo al grano. Sin saludos, introducciones vacías ni texto innecesario.
+3. **Refutación Activa**: Si una idea o planteamiento es ineficiente, genera bugs o no escala, refútalo con fundamentos técnicos y proporciona la implementación superior.
+4. **Sincronización de Contexto**: Cada cambio validado se consulta para registrarlo en `PROJECT_CONTEXT.md`.

@@ -1,5 +1,6 @@
-// Paleta de colores oficial de ExLibris
-export const ExLibrisColors = {
+export type ThemeMode = 'light' | 'dark';
+
+const lightColors = {
   primary: '#7B1E2B',        // Vino / Granate característico de ExLibris
   primaryDark: '#56131D',
   primaryLight: '#992B3B',
@@ -29,6 +30,37 @@ export const ExLibrisColors = {
   progress: '#3E7B54',       // Barra de progreso de lectura
   progressBg: '#E4DDD3',
 };
+
+export type ThemeColors = typeof lightColors;
+
+const darkColors: typeof lightColors = {
+  primary: '#A94757',
+  primaryDark: '#78303B',
+  primaryLight: '#C56472',
+  primaryMuted: '#3B252A',
+  background: '#171513',
+  surface: '#24211F',
+  surfaceVariant: '#2E2A27',
+  text: '#F3EEE9',
+  textSecondary: '#C2B9B0',
+  textMuted: '#9F978F',
+  textLight: '#FFFFFF',
+  border: '#403A34',
+  borderDark: '#514941',
+  gold: '#F2BB5A',
+  goldMuted: '#392D1B',
+  moderator: '#91C9A6',
+  moderatorLight: '#24372E',
+  danger: '#F07A75',
+  dangerLight: '#3B2624',
+  progress: '#8EC79D',
+  progressBg: '#38332D',
+};
+
+export const ExLibrisColors = lightColors;
+
+export const getThemeColors = (mode: ThemeMode): ThemeColors =>
+  mode === 'dark' ? darkColors : lightColors;
 
 // Medidas y espaciados oficiales de ExLibris
 export const ExLibrisMetrics = {
@@ -60,12 +92,12 @@ export const globalMedidas = {
 // Compatibilidad con plantilla estándar de Expo
 export const Colors = {
   light: {
-    text: ExLibrisColors.text,
-    background: ExLibrisColors.background,
-    tint: ExLibrisColors.primary,
-    icon: ExLibrisColors.textSecondary,
-    tabIconDefault: ExLibrisColors.textSecondary,
-    tabIconSelected: ExLibrisColors.primary,
+    text: lightColors.text,
+    background: lightColors.background,
+    tint: lightColors.primary,
+    icon: lightColors.textSecondary,
+    tabIconDefault: lightColors.textSecondary,
+    tabIconSelected: lightColors.primary,
   },
   dark: {
     text: '#FFFFFF',

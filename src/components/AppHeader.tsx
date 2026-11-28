@@ -1,4 +1,6 @@
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { NotificationItem, useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -19,6 +21,7 @@ interface AppHeaderProps {
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
   const {
     userRole,
@@ -35,6 +38,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
 
   const handlePressNotificacion = (item: NotificationItem) => {
     marcarNotificacionLeida(item.id_notificacion);
+    if (item.tipo === 'moderacion' && item.titulo.startsWith('Revisión pendiente:')) {
+      setModalNotifVisible(false);
+      router.push('/panel_moderacion');
+      return;
+    }
     if (item.isbn) {
       setModalNotifVisible(false);
       router.push({
@@ -48,7 +56,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
     switch (tipo) {
       case 'like':
         return (
-          <View style={[styles.tipoBadge, { backgroundColor: ExLibrisColors.primary }]}>
+          <View style={[styles.tipoBadge, { backgroundColor: colors.primary }]}>
             <Ionicons name="thumbs-up" size={14} color="#FFFFFF" />
           </View>
         );
@@ -60,13 +68,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
         );
       case 'moderacion':
         return (
-          <View style={[styles.tipoBadge, { backgroundColor: ExLibrisColors.danger }]}>
+          <View style={[styles.tipoBadge, { backgroundColor: colors.danger }]}>
             <Ionicons name="alert-circle" size={14} color="#FFFFFF" />
           </View>
         );
       default:
         return (
-          <View style={[styles.tipoBadge, { backgroundColor: ExLibrisColors.textSecondary }]}>
+          <View style={[styles.tipoBadge, { backgroundColor: colors.textSecondary }]}>
             <Ionicons name="notifications" size={14} color="#FFFFFF" />
           </View>
         );
@@ -79,7 +87,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
         <View style={styles.leftSection}>
           <View style={styles.logoRow}>
             <View style={styles.logoBadge}>
-              <Ionicons name="book-outline" size={16} color={ExLibrisColors.textLight} />
+              <Ionicons name="book-outline" size={16} color={colors.textLight} />
             </View>
             <Text style={styles.brandTitle}>ExLibris</Text>
           </View>
@@ -97,7 +105,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
             <Ionicons
               name={userRole === 'moderador' ? 'alert-circle-outline' : 'person-circle-outline'}
               size={13}
-              color={userRole === 'moderador' ? ExLibrisColors.moderator : ExLibrisColors.primary}
+              color={userRole === 'moderador' ? colors.moderator : colors.primary}
             />
             <Text
               style={[
@@ -118,7 +126,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
             }}
             hitSlop={8}
           >
-            <Ionicons name="notifications-outline" size={22} color={ExLibrisColors.text} />
+            <Ionicons name="notifications-outline" size={22} color={colors.text} />
             {notificacionesNoLeidasCount > 0 && (
               <View style={styles.notificationBadge}>
                 <Text style={styles.notificationBadgeText}>
@@ -161,14 +169,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                 hitSlop={8}
                 accessibilityLabel="Actualizar notificaciones"
               >
-                <Ionicons name="refresh-outline" size={20} color={ExLibrisColors.primary} />
+                <Ionicons name="refresh-outline" size={20} color={colors.primary} />
               </Pressable>
               <Pressable
                 style={styles.btnClose}
                 onPress={() => setModalNotifVisible(false)}
                 hitSlop={8}
               >
-                <Ionicons name="close" size={24} color={ExLibrisColors.text} />
+                <Ionicons name="close" size={24} color={colors.text} />
               </Pressable>
             </View>
           </View>
@@ -180,7 +188,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                 style={styles.btnActionSecondary}
                 onPress={marcarTodasNotificacionesLeidas}
               >
-                <Ionicons name="checkmark-done-outline" size={15} color={ExLibrisColors.primary} />
+                <Ionicons name="checkmark-done-outline" size={15} color={colors.primary} />
                 <Text style={styles.btnActionSecondaryText}>Marcar todas como leídas</Text>
               </Pressable>
 
@@ -188,7 +196,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                 style={styles.btnActionSecondary}
                 onPress={limpiarTodasNotificaciones}
               >
-                <Ionicons name="trash-outline" size={14} color={ExLibrisColors.textSecondary} />
+                <Ionicons name="trash-outline" size={14} color={colors.textSecondary} />
                 <Text style={styles.btnActionSecondaryTextMuted}>Limpiar</Text>
               </Pressable>
             </View>
@@ -228,7 +236,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                     {item.isbn && (
                       <View style={styles.notifGoLink}>
                         <Text style={styles.notifGoLinkText}>Ver en debate</Text>
-                        <Ionicons name="arrow-forward" size={11} color={ExLibrisColors.primary} />
+                        <Ionicons name="arrow-forward" size={11} color={colors.primary} />
                       </View>
                     )}
                   </View>
@@ -240,14 +248,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
                   onPress={() => eliminarNotificacion(item.id_notificacion)}
                   hitSlop={6}
                 >
-                  <Ionicons name="close-outline" size={16} color={ExLibrisColors.textMuted} />
+                  <Ionicons name="close-outline" size={16} color={colors.textMuted} />
                 </Pressable>
               </Pressable>
             )}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
-                  <Ionicons name="notifications-off-outline" size={36} color={ExLibrisColors.textMuted} />
+                  <Ionicons name="notifications-off-outline" size={36} color={colors.textMuted} />
                 </View>
                 <Text style={styles.emptyTitle}>Bandeja sin notificaciones</Text>
                 <Text style={styles.emptySubtitle}>
@@ -262,16 +270,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ subtitle }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: ExLibrisMetrics.spacingMd,
     paddingVertical: ExLibrisMetrics.spacingSm,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: ExLibrisColors.border,
+    borderBottomColor: colors.border,
   },
   leftSection: {
     flex: 1,
@@ -284,7 +292,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 6,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
@@ -292,12 +300,12 @@ const styles = StyleSheet.create({
   brandTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     letterSpacing: 0.5,
   },
   headerSubtitle: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -316,20 +324,20 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   rolePillLector: {
-    backgroundColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
   },
   rolePillModerador: {
-    backgroundColor: ExLibrisColors.moderatorLight,
+    backgroundColor: colors.moderatorLight,
   },
   roleText: {
     fontSize: 11,
     fontWeight: '600',
   },
   roleTextLector: {
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   roleTextModerador: {
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
   },
   iconButton: {
     padding: 4,
@@ -339,7 +347,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    backgroundColor: ExLibrisColors.danger,
+    backgroundColor: colors.danger,
     minWidth: 16,
     height: 16,
     borderRadius: 8,
@@ -347,7 +355,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 3,
     borderWidth: 1.5,
-    borderColor: ExLibrisColors.background,
+    borderColor: colors.background,
   },
   notificationBadgeText: {
     color: '#FFFFFF',
@@ -356,7 +364,7 @@ const styles = StyleSheet.create({
   },
   modalSafeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -365,8 +373,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: ExLibrisMetrics.spacingMd,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: ExLibrisColors.border,
-    backgroundColor: ExLibrisColors.surface,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
   },
   modalHeaderTitleRow: {
     flexDirection: 'row',
@@ -377,18 +385,18 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   modalSubtitle: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   modalHeaderActions: {
     flexDirection: 'row',
@@ -398,7 +406,7 @@ const styles = StyleSheet.create({
   btnActionRefresh: {
     padding: 6,
     borderRadius: 8,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   btnClose: {
     padding: 4,
@@ -409,9 +417,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: ExLibrisMetrics.spacingMd,
     paddingVertical: 8,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ExLibrisColors.border,
+    borderBottomColor: colors.border,
   },
   btnActionSecondary: {
     flexDirection: 'row',
@@ -422,11 +430,11 @@ const styles = StyleSheet.create({
   btnActionSecondaryText: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   btnActionSecondaryTextMuted: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   notifListContent: {
     padding: ExLibrisMetrics.spacingMd,
@@ -435,19 +443,19 @@ const styles = StyleSheet.create({
   },
   notifCard: {
     flexDirection: 'row',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 12,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     gap: 10,
     alignItems: 'flex-start',
   },
   notifCardUnread: {
-    backgroundColor: '#FBF8F4',
-    borderColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.background,
+    borderColor: colors.primaryMuted,
     borderLeftWidth: 3,
-    borderLeftColor: ExLibrisColors.primary,
+    borderLeftColor: colors.primary,
   },
   notifLeft: {
     paddingTop: 2,
@@ -471,21 +479,21 @@ const styles = StyleSheet.create({
   notifTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   notifTitleUnread: {
     fontWeight: '800',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   unreadDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
   },
   notifMessage: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     lineHeight: 16,
   },
   notifFooterRow: {
@@ -496,7 +504,7 @@ const styles = StyleSheet.create({
   },
   notifDate: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   notifGoLink: {
     flexDirection: 'row',
@@ -506,7 +514,7 @@ const styles = StyleSheet.create({
   notifGoLinkText: {
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   btnDeleteSingle: {
     padding: 2,
@@ -521,7 +529,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -529,12 +537,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 18,
   },

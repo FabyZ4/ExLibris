@@ -63,12 +63,52 @@ export const getAuthenticatedUserProfile = async (): Promise<UserProfile | null>
   return mapAuthenticatedUser(data.user, data.user.email || '');
 };
 
+export const requestAuthEmailChange = async (email: string): Promise<void> => {
+  const { error } = await supabase.auth.updateUser({ email });
+  if (error) throw error;
+};
+
+export const updateAuthPassword = async (
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> => {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!userData.user || userData.user.id !== userId || !userData.user.email) {
+    throw new Error('No se pudo validar la sesión actual. Vuelve a iniciar sesión e inténtalo de nuevo.');
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: userData.user.email,
+    password: currentPassword,
+  });
+  if (error) {
+    if (error.code === 'invalid_credentials') {
+      throw new Error('La contraseña actual es incorrecta.');
+    }
+    throw error;
+  }
+  if (data.user?.id !== userId) {
+    throw new Error('No se pudo verificar que la cuenta autenticada sea la misma.');
+  }
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw updateError;
+};
+
 // Iniciar sesión con email y contraseña
 export const signInWithEmail = async (email: string, password: string): Promise<{ user: UserProfile | null; error?: string }> => {
   try {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      return { user: null, error: error.message };
+      const emailNotConfirmed = error.message.toLowerCase().includes('email not confirmed');
+      return {
+        user: null,
+        error: emailNotConfirmed
+          ? 'Primero verifica tu correo con el enlace que te enviamos. Después podrás iniciar sesión.'
+          : error.message,
+      };
     }
 
     if (!data.user) {
@@ -88,7 +128,12 @@ export const signUpWithEmail = async (
   email: string,
   password: string,
   nombre: string
-): Promise<{ success: boolean; error?: string }> => {
+): Promise<{
+  success: boolean;
+  error?: string;
+  emailVerificationRequired?: boolean;
+  emailRateLimited?: boolean;
+}> => {
   try {
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -101,11 +146,26 @@ export const signUpWithEmail = async (
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      const emailRateLimited = error.status === 429
+        || error.code === 'over_email_send_rate_limit'
+        || error.message.toLowerCase().includes('email rate limit exceeded');
+      return {
+        success: false,
+        error: emailRateLimited
+          ? 'Supabase limitó temporalmente el envío del correo de verificación. Espera antes de volver a intentarlo. Si ya recibiste un enlace, úsalo para verificar tu cuenta y luego inicia sesión.'
+          : error.message,
+        emailRateLimited,
+      };
     }
 
     if (!data.user) return { success: false, error: 'Supabase no devolvió el usuario creado.' };
-    return { success: true };
+    if (data.user.identities?.length === 0) {
+      return {
+        success: false,
+        error: 'No se pudo completar el registro. Si ya tienes una cuenta, inicia sesión o restablece tu contraseña.',
+      };
+    }
+    return { success: true, emailVerificationRequired: !data.session };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error al registrar usuario.' };
   }

@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, StyleSheet, StyleProp, ViewStyle } from 'react-native';
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 
 interface ProgressBarProps {
   progress: number; // 0 a 1
@@ -12,22 +14,23 @@ interface ProgressBarProps {
 export const ProgressBar: React.FC<ProgressBarProps> = ({
   progress,
   style,
-  color = ExLibrisColors.progress,
+  color,
   height = 5,
 }) => {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const clamped = Math.max(0, Math.min(1, progress || 0));
 
   return (
     <View style={[styles.track, { height }, style]}>
-      <View style={[styles.fill, { width: `${clamped * 100}%`, backgroundColor: color }]} />
+      <View style={[styles.fill, { width: `${clamped * 100}%`, backgroundColor: color || colors.progress }]} />
     </View>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   track: {
     width: '100%',
-    backgroundColor: ExLibrisColors.progressBg,
+    backgroundColor: colors.progressBg,
     borderRadius: ExLibrisMetrics.radiusPill,
     overflow: 'hidden',
   },

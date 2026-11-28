@@ -1,5 +1,7 @@
 import { AppHeader } from '@/components/AppHeader';
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { Book, useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -8,7 +10,9 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Pressable,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,6 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ExplorarScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
   const {
     catalogo,
@@ -30,11 +35,25 @@ export default function ExplorarScreen() {
     obtenerMetricasLibro,
   } = useExLibris();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategoria, setSelectedCategoria] = useState('Todos');
+  const [selectedCategorias, setSelectedCategorias] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const librosFiltrados = buscarEnCatalogo(searchTerm, selectedCategoria);
+  const librosFiltrados = buscarEnCatalogo(searchTerm, selectedCategorias);
   const recomendados = catalogo.slice(0, 4);
+
+  const handleToggleCategoria = (cat: string) => {
+    if (cat === 'Todos') {
+      setSelectedCategorias([]);
+      return;
+    }
+
+    setSelectedCategorias(prev => {
+      if (prev.includes(cat)) {
+        return prev.filter(c => c !== cat);
+      }
+      return [...prev, cat];
+    });
+  };
 
   const isInLibrary = (isbn: string) => {
     return biblioteca.some(b => b.isbn === isbn);
@@ -79,59 +98,86 @@ export default function ExplorarScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <AppHeader subtitle="Explorar y Descubrir" />
 
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         {/* Barra superior de búsqueda reactiva */}
         <View style={styles.searchSection}>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={ExLibrisColors.textSecondary} />
+            <Ionicons name="search" size={18} color={colors.textSecondary} />
             <TextInput
               style={styles.searchInput}
               placeholder="Buscar por título, autor o ISBN..."
-              placeholderTextColor={ExLibrisColors.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={searchTerm}
               onChangeText={setSearchTerm}
             />
             {searchTerm.length > 0 && (
               <Pressable onPress={() => setSearchTerm('')}>
-                <Ionicons name="close-circle" size={18} color={ExLibrisColors.textSecondary} />
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
               </Pressable>
             )}
           </View>
         </View>
 
-        {/* Fila deslizable de filtros rápidos con Chips */}
+        {/* Fila deslizable de filtros rápidos con Chips (Multi-selección) */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsContainer}
         >
-          {['Todos', ...categorias].map(cat => (
-            <Pressable
-              key={cat}
+          {/* Chip "Todos" */}
+          <Pressable
+            style={[
+              styles.chip,
+              selectedCategorias.length === 0 && styles.chipActive,
+            ]}
+            onPress={() => handleToggleCategoria('Todos')}
+          >
+            <Text
               style={[
-                styles.chip,
-                selectedCategoria === cat && styles.chipActive,
+                styles.chipText,
+                selectedCategorias.length === 0 && styles.chipTextActive,
               ]}
-              onPress={() => setSelectedCategoria(cat)}
             >
-              <Text
+              Todos
+            </Text>
+          </Pressable>
+
+          {/* Categorías dinámicas */}
+          {categorias.map(cat => {
+            const isSelected = selectedCategorias.includes(cat);
+            return (
+              <Pressable
+                key={cat}
                 style={[
-                  styles.chipText,
-                  selectedCategoria === cat && styles.chipTextActive,
+                  styles.chip,
+                  isSelected && styles.chipActive,
                 ]}
+                onPress={() => handleToggleCategoria(cat)}
               >
-                {cat}
-              </Text>
-            </Pressable>
-          ))}
+                <Text
+                  style={[
+                    styles.chipText,
+                    isSelected && styles.chipTextActive,
+                  ]}
+                >
+                  {cat}
+                </Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         {/* Sección 1: Obras Recomendadas (Carrusel Horizontal) */}
-        {!searchTerm && selectedCategoria === 'Todos' && (
+        {!searchTerm && selectedCategorias.length === 0 && (
           <View style={styles.sectionHeader}>
             <View>
               <Text style={styles.sectionTitle}>Obras recomendadas</Text>
@@ -141,7 +187,7 @@ export default function ExplorarScreen() {
           </View>
         )}
 
-        {!searchTerm && selectedCategoria === 'Todos' && (
+        {!searchTerm && selectedCategorias.length === 0 && (
           <FlatList
             horizontal
             data={recomendados}
@@ -171,7 +217,7 @@ export default function ExplorarScreen() {
                       <Ionicons
                         name={metricas.promedio !== null ? 'star' : 'star-outline'}
                         size={12}
-                        color={metricas.promedio !== null ? ExLibrisColors.gold : ExLibrisColors.textSecondary}
+                        color={metricas.promedio !== null ? colors.gold : colors.textSecondary}
                       />
                       <Text style={styles.ratingValue}>
                         {metricas.promedio !== null ? metricas.promedio.toFixed(1) : '—'}
@@ -188,7 +234,7 @@ export default function ExplorarScreen() {
         {/* Sección 2: Novedades en Catálogo (Lista Vertical) */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            {searchTerm || selectedCategoria !== 'Todos'
+            {searchTerm || selectedCategorias.length > 0
               ? `Resultados (${librosFiltrados.length})`
               : 'Novedades en Catálogo'}
           </Text>
@@ -197,7 +243,7 @@ export default function ExplorarScreen() {
         <View style={styles.verticalList}>
           {librosFiltrados.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="book-outline" size={40} color={ExLibrisColors.textMuted} />
+              <Ionicons name="book-outline" size={40} color={colors.textMuted} />
               <Text style={styles.emptyText}>No encontramos libros con ese criterio.</Text>
             </View>
           ) : (
@@ -238,7 +284,7 @@ export default function ExplorarScreen() {
                       <Ionicons
                         name={agregado ? 'checkmark' : 'add'}
                         size={14}
-                        color={agregado ? ExLibrisColors.moderator : ExLibrisColors.primary}
+                        color={agregado ? colors.moderator : colors.primary}
                       />
                       <Text
                         style={[
@@ -258,16 +304,20 @@ export default function ExplorarScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   container: {
+    flex: 1,
+  },
+  keyboardContainer: {
     flex: 1,
   },
   searchSection: {
@@ -277,18 +327,18 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: ExLibrisMetrics.radiusPill,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     gap: 8,
   },
   searchInput: {
     flex: 1,
     fontSize: 13,
-    color: ExLibrisColors.text,
+    color: colors.text,
     padding: 0,
   },
   chipsContainer: {
@@ -300,18 +350,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: ExLibrisMetrics.radiusPill,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   chipActive: {
-    backgroundColor: ExLibrisColors.primary,
-    borderColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   chipText: {
     fontSize: 12,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   chipTextActive: {
     color: '#FFFFFF',
@@ -324,11 +374,11 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   sectionSubtitle: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   horizontalCarousel: {
@@ -338,11 +388,11 @@ const styles = StyleSheet.create({
   },
   carouselCard: {
     width: 135,
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 8,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -353,17 +403,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 160,
     borderRadius: ExLibrisMetrics.radiusSm,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     marginBottom: 8,
   },
   carouselTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   carouselAuthor: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   carouselRating: {
@@ -375,11 +425,11 @@ const styles = StyleSheet.create({
   ratingValue: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   ratingCount: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   verticalList: {
     paddingHorizontal: ExLibrisMetrics.spacingMd,
@@ -387,11 +437,11 @@ const styles = StyleSheet.create({
   },
   verticalCard: {
     flexDirection: 'row',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 10,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -402,7 +452,7 @@ const styles = StyleSheet.create({
     width: 75,
     height: 105,
     borderRadius: ExLibrisMetrics.radiusSm,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     marginRight: 12,
   },
   verticalInfo: {
@@ -417,30 +467,30 @@ const styles = StyleSheet.create({
   categoryBadge: {
     fontSize: 9,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
-    backgroundColor: ExLibrisColors.primaryMuted,
+    color: colors.primary,
+    backgroundColor: colors.primaryMuted,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
   yearBadge: {
     fontSize: 9,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     paddingVertical: 2,
   },
   verticalTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   verticalAuthor: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   isbnText: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     marginTop: 3,
     marginBottom: 8,
   },
@@ -448,25 +498,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: ExLibrisMetrics.radiusPill,
     gap: 4,
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
   },
   btnAddShelfDone: {
-    backgroundColor: ExLibrisColors.moderatorLight,
-    borderColor: ExLibrisColors.moderator,
+    backgroundColor: colors.moderatorLight,
+    borderColor: colors.moderator,
   },
   btnAddShelfText: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   btnAddShelfTextDone: {
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -475,7 +525,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 13,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 8,
   },
 });

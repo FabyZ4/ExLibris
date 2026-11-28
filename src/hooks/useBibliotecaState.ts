@@ -90,6 +90,8 @@ export const useBibliotecaState = (
               sinopsis: bookToAdd.sinopsis,
               portada_url: bookToAdd.portada_url,
               total_paginas: bookToAdd.total_paginas,
+              editorial: bookToAdd.editorial,
+              anio: bookToAdd.anio,
             });
             const [savedItem] = await guardarEnBibliotecaDb({
               isbn: bookToAdd.isbn,

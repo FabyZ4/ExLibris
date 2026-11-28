@@ -1,8 +1,10 @@
 import { useBibliotecaState } from '@/hooks/useBibliotecaState';
 import { useCatalogoState } from '@/hooks/useCatalogoState';
 import { useComunidadState } from '@/hooks/useComunidadState';
+import { useContactoState } from '@/hooks/useContactoState';
 import { useModeracionState } from '@/hooks/useModeracionState';
 import { useNotificacionesState } from '@/hooks/useNotificacionesState';
+import { useSolicitudesLibroState } from '@/hooks/useSolicitudesLibroState';
 import {
   getAuthenticatedUserProfile,
   signInWithEmail,
@@ -15,16 +17,19 @@ import {
   getLikesResenaDb,
   getLibrosFromDb,
   getNotificacionesDb,
-  getReportesPendientesDb,
   getResenasFromDb,
   getRespuestasResenaDb,
+  updatePublicUsernameDb,
 } from '@/services/database.service';
 import { GoogleBookVolume } from '@/services/googleBooks.service';
 import { UserProfile, UserRole } from '@/types/auth.types';
 import { BibliotecaItem, Book, BookRatingStats } from '@/types/book.types';
 import { Review } from '@/types/community.types';
-import { ModerationReport } from '@/types/moderation.types';
+import { BookProposal, BookProposalData, ModerationReport } from '@/types/moderation.types';
 import { NotificationItem } from '@/types/notification.types';
+import { ContactMessage, ContactTopic } from '@/types/contact.types';
+import type { ThemeMode } from '@/constants/theme';
+import { ThemeColorsProvider } from '@/store/ThemeContext';
 import {
   mapBibliotecaFromDb,
   mapNotificaciones,
@@ -34,20 +39,31 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 // Re-exportar tipos para mantener compatibilidad total con todas las pantallas
 export type { UserProfile, UserRole } from '@/types/auth.types';
 export type { BibliotecaItem, Book, BookRatingStats } from '@/types/book.types';
 export type { CommentReply, Review } from '@/types/community.types';
 export type { ModerationReport } from '@/types/moderation.types';
+export type { BookProposal, BookProposalData } from '@/types/moderation.types';
 export type { NotificationItem } from '@/types/notification.types';
 
 export interface ExLibrisContextType {
   currentUser: UserProfile | null;
   userRole: UserRole;
+  themeMode: ThemeMode;
+  actualizarTema: (mode: ThemeMode) => Promise<void>;
+  actualizarNombrePublico: (nombre: string) => Promise<void>;
   iniciarSesion: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   cerrarSesion: () => Promise<void>;
-  registrarse: (email: string, password: string, nombre: string) => Promise<{ success: boolean; message?: string; needsLogin?: boolean }>;
+  registrarse: (email: string, password: string, nombre: string) => Promise<{
+    success: boolean;
+    message?: string;
+    needsLogin?: boolean;
+    needsEmailVerification?: boolean;
+    emailRateLimited?: boolean;
+  }>;
 
   biblioteca: BibliotecaItem[];
   agregarALaBiblioteca: (
@@ -63,10 +79,13 @@ export interface ExLibrisContextType {
   catalogo: Book[];
   categorias: string[];
   recargarCatalogo: () => Promise<void>;
-  buscarEnCatalogo: (query: string, categoria?: string) => Book[];
+  buscarEnCatalogo: (query: string, categoria?: string | string[]) => Book[];
   buscarObrasPorIsbn: (isbn: string) => Promise<Book | null>;
 
   resenas: Review[];
+  cargandoMasResenas?: boolean;
+  hayMasResenas?: boolean;
+  cargarMasResenas?: (isbn?: string) => Promise<void>;
   publicarResena: (isbn: string, calificacion: number, comentario: string) => void;
   eliminarResenaPropia: (id_resena: string) => Promise<void>;
   darLikeResena: (id_resena: string) => void;
@@ -76,8 +95,33 @@ export interface ExLibrisContextType {
   obtenerMetricasLibro: (isbn: string) => BookRatingStats;
 
   reportes: ModerationReport[];
-  reportarComentario: (id_resena: string, motivo: string) => void;
-  moderarReporte: (id_reporte: string, accion: 'conservar' | 'eliminar') => void;
+  reportarComentario: (id_resena: string, motivo: string, id_respuesta?: string) => Promise<void>;
+  moderarReporte: (id_reporte: string, accion: 'conservar' | 'eliminar') => Promise<void>;
+  solicitudesLibroPropias: BookProposal[];
+  solicitudesLibroPendientes: BookProposal[];
+  cargandoSolicitudesLibro: boolean;
+  errorSolicitudesLibro: string | null;
+  revisionesPendientesCount: number;
+  recargarSolicitudesLibro: () => Promise<void>;
+  enviarSolicitudLibro: (solicitud: {
+    id_libro: string | null;
+    isbn: string;
+    tipo: BookProposal['tipo'];
+    datos_propuestos: BookProposalData;
+  }) => Promise<void>;
+  resolverSolicitudLibro: (
+    id_solicitud: string,
+    accion: 'aprobar' | 'rechazar',
+    campos_aprobados?: string[],
+    nota?: string
+  ) => Promise<void>;
+  misMensajesContacto: ContactMessage[];
+  mensajesContactoPendientes: ContactMessage[];
+  cargandoContacto: boolean;
+  errorContacto: string | null;
+  recargarMensajesContacto: () => Promise<void>;
+  enviarMensajeContacto: (tipo: ContactTopic, mensaje: string) => Promise<void>;
+  resolverMensajeContacto: (id_contacto: string) => Promise<void>;
 
   metricasModeracion: {
     pendientes: number;
@@ -94,6 +138,7 @@ export interface ExLibrisContextType {
 }
 
 const STORAGE_KEY = '@exlibris_data_store_v1';
+const THEME_MODE_STORAGE_KEY = '@exlibris_theme_mode_v1';
 
 export const LIBROS_INICIALES: Book[] = [];
 
@@ -103,7 +148,10 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Estado de usuario y sesión
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('lector');
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
   const [datosLocalesCargados, setDatosLocalesCargados] = useState(false);
+  const themePreferenceChanged = useRef(false);
+  const themePersistenceSequence = useRef(0);
 
   const currentUserRef = useRef<UserProfile | null>(null);
   useEffect(() => {
@@ -125,6 +173,73 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const moderacionState = useModeracionState(currentUser, resenas, setResenas);
   const { reportes, setReportes } = moderacionState;
+  const solicitudesLibroState = useSolicitudesLibroState(currentUser, userRole);
+  const contactoState = useContactoState(currentUser);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(THEME_MODE_STORAGE_KEY)
+      .then(savedMode => {
+        if (
+          !active ||
+          themePreferenceChanged.current ||
+          (savedMode !== 'light' && savedMode !== 'dark')
+        ) return;
+        setThemeMode(savedMode);
+      })
+      .catch(error => console.warn('No se pudo cargar la preferencia de tema:', error));
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const email = session?.user?.email;
+      if (event === 'USER_UPDATED' && email) {
+        setCurrentUser(previous => previous ? { ...previous, email } : previous);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const actualizarTema = useCallback(async (mode: ThemeMode) => {
+    const previousMode = themeMode;
+    const sequence = ++themePersistenceSequence.current;
+    themePreferenceChanged.current = true;
+    setThemeMode(mode);
+    try {
+      await AsyncStorage.setItem(THEME_MODE_STORAGE_KEY, mode);
+    } catch (error) {
+      if (sequence === themePersistenceSequence.current) {
+        setThemeMode(previousMode);
+      }
+      throw error;
+    }
+  }, [themeMode]);
+
+  const actualizarNombrePublico = useCallback(async (nombre: string) => {
+    if (!currentUser) throw new Error('Debes iniciar sesión para editar tu perfil.');
+    const normalizedName = nombre.trim();
+    if (normalizedName.length < 2 || normalizedName.length > 30) {
+      throw new Error('El nombre público debe tener entre 2 y 30 caracteres.');
+    }
+
+    await updatePublicUsernameDb(currentUser.id, normalizedName);
+    setCurrentUser(previous => previous ? { ...previous, nombre: normalizedName } : previous);
+    const updateReplyNames = (replies: Review['respuestas']): Review['respuestas'] =>
+      replies?.map(reply => ({
+        ...reply,
+        ...(reply.id_usuario === currentUser.id ? { nombre_usuario: normalizedName } : {}),
+        respuestas: updateReplyNames(reply.respuestas),
+      }));
+    setResenas(previous => previous.map(review => ({
+      ...review,
+      ...(review.id_usuario === currentUser.id ? { nombre_usuario: normalizedName } : {}),
+      respuestas: updateReplyNames(review.respuestas),
+    })));
+  }, [currentUser, setResenas]);
 
   // Sincronización en vivo
   const sincronizarDatos = useCallback(async () => {
@@ -255,29 +370,6 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             console.warn('No se pudieron cargar las notificaciones desde Supabase:', notifErr);
           }
 
-          if (authenticatedUser.rol === 'moderador') {
-            try {
-              const remoteReports = await getReportesPendientesDb();
-              if (remoteReports && remoteReports.length > 0) {
-                setReportes(remoteReports.map((rep: any) => ({
-                  id_reporte: rep.id_reporte,
-                  id_resena: rep.id_resena,
-                  id_usuario_infractor: rep.resenas?.id_usuario,
-                  usuario_infractor: `@${(rep.resenas?.usuario?.nombre_usuario || 'usuario').toLowerCase().replace(/\s+/g, '_')}`,
-                  titulo_obra: rep.resenas?.libros?.titulo || 'Obra Literaria',
-                  motivo: rep.motivo,
-                  comentario: rep.resenas?.comentario || '',
-                  fecha: rep.creado_el
-                    ? new Date(rep.creado_el).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
-                    : 'Reciente',
-                  prioridad: 'alta',
-                  estado: rep.estado || 'pendiente',
-                })));
-              }
-            } catch (repErr) {
-              console.warn('No se pudieron cargar los reportes de moderación:', repErr);
-            }
-          }
         }
 
         try {
@@ -306,8 +398,8 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               const ids = new Set(dbLibros.map(l => l.isbn));
               const formatDb = dbLibros.map(d => ({
                 ...d,
-                editorial: 'Editorial canónica',
-                anio: 2024,
+                editorial: d.editorial || 'Editorial canónica',
+                anio: d.anio || 2024,
               }));
               return [...formatDb, ...prev.filter(p => !ids.has(p.isbn))];
             });
@@ -397,30 +489,6 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('No se pudieron sincronizar reseñas al iniciar sesión:', resenasErr);
       }
 
-      if (user.rol === 'moderador') {
-        try {
-          const remoteReports = await getReportesPendientesDb();
-          if (remoteReports && remoteReports.length > 0) {
-            setReportes(remoteReports.map((rep: any) => ({
-              id_reporte: rep.id_reporte,
-              id_resena: rep.id_resena,
-              id_usuario_infractor: rep.resenas?.id_usuario,
-              usuario_infractor: `@${(rep.resenas?.usuario?.nombre_usuario || 'usuario').toLowerCase().replace(/\s+/g, '_')}`,
-              titulo_obra: rep.resenas?.libros?.titulo || 'Obra Literaria',
-              motivo: rep.motivo,
-              comentario: rep.resenas?.comentario || '',
-              fecha: rep.creado_el
-                ? new Date(rep.creado_el).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
-                : 'Reciente',
-              prioridad: 'alta',
-              estado: rep.estado || 'pendiente',
-            })));
-          }
-        } catch (repErr) {
-          console.warn('No se pudieron cargar los reportes de moderación:', repErr);
-        }
-      }
-
       return { success: true };
     }
 
@@ -439,10 +507,28 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     email: string,
     password: string,
     nombre: string
-  ): Promise<{ success: boolean; message?: string; needsLogin?: boolean }> => {
+  ): Promise<{
+    success: boolean;
+    message?: string;
+    needsLogin?: boolean;
+    needsEmailVerification?: boolean;
+    emailRateLimited?: boolean;
+  }> => {
     const res = await signUpWithEmail(email, password, nombre);
     if (!res.success) {
-      return { success: false, message: res.error };
+      return {
+        success: false,
+        message: res.error,
+        emailRateLimited: res.emailRateLimited,
+      };
+    }
+    if (res.emailVerificationRequired) {
+      return {
+        success: false,
+        needsLogin: true,
+        needsEmailVerification: true,
+        message: `Cuenta creada. Verifica tu correo en ${email} usando el enlace que te enviamos. Después podrás iniciar sesión. Revisa también la carpeta de spam.`,
+      };
     }
     const login = await iniciarSesion(email, password);
     if (!login.success) {
@@ -460,6 +546,9 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         currentUser,
         userRole,
+        themeMode,
+        actualizarTema,
+        actualizarNombrePublico,
         iniciarSesion,
         cerrarSesion,
         registrarse,
@@ -467,11 +556,13 @@ export const ExLibrisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...catalogoState,
         ...comunidadState,
         ...moderacionState,
+        ...solicitudesLibroState,
+        ...contactoState,
         ...notificacionesState,
         sincronizarDatos,
       }}
     >
-      {children}
+      <ThemeColorsProvider mode={themeMode}>{children}</ThemeColorsProvider>
     </ExLibrisContext.Provider>
   );
 };

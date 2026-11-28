@@ -19,8 +19,8 @@ export const useCatalogoState = () => {
         const ids = new Set(dbLibros.map(book => book.isbn));
         const formatDb = dbLibros.map(book => ({
           ...book,
-          editorial: 'Editorial canónica',
-          anio: 2024,
+          editorial: book.editorial || 'Editorial canónica',
+          anio: book.anio || 2024,
         }));
         return [...formatDb, ...prev.filter(book => !ids.has(book.isbn))];
       });
@@ -29,44 +29,80 @@ export const useCatalogoState = () => {
     }
   }, []);
 
-  const buscarEnCatalogo = useCallback((query: string, categoria?: string) => {
+  const buscarEnCatalogo = useCallback((query: string, categoria?: string | string[]) => {
     const q = query.toLowerCase().trim();
+    const categoriasSeleccionadas = Array.isArray(categoria)
+      ? categoria.filter(c => c && c !== 'Todos')
+      : (categoria && categoria !== 'Todos' ? [categoria] : []);
+
     return catalogo.filter(b => {
       const matchQuery =
         !q ||
         b.titulo.toLowerCase().includes(q) ||
         b.autor.toLowerCase().includes(q) ||
         b.isbn.includes(q);
-      const matchCat =
-        !categoria ||
-        categoria === 'Todos' ||
-        b.categorias.some(item => item.toLowerCase().includes(categoria.toLowerCase()));
-      return matchQuery && matchCat;
+
+      if (!matchQuery) return false;
+      if (categoriasSeleccionadas.length === 0) return true;
+
+      // Un libro coincide si tiene al menos una de las categorías seleccionadas
+      const bookCats = (b.categorias || []).map(c => c.toLowerCase());
+      return categoriasSeleccionadas.some(cat => bookCats.includes(cat.toLowerCase()));
     });
   }, [catalogo]);
 
   const buscarObrasPorIsbn = useCallback(async (isbn: string): Promise<Book | null> => {
     const clean = isbn.replace(/[-\s]/g, '');
-    const inCatalog = catalogo.find(b => b.isbn === clean);
-    if (inCatalog) return inCatalog;
+    const filtrarCategoriasRegistradas = async (categoriasExtraidas: string[]) => {
+      try {
+        const dbCategorias = await getCategoriasFromDb();
+        const nombresRegistrados = dbCategorias.map(category => category.nombre_categoria);
+        const clavesRegistradas = new Set(
+          nombresRegistrados.map(nombre =>
+            nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+          )
+        );
 
-    const fromGoogle = await buscarLibroPorIsbn(clean);
-    if (fromGoogle) {
-      const newBook: Book = {
-        isbn: fromGoogle.isbn,
-        titulo: fromGoogle.titulo,
-        autor: fromGoogle.autor,
-        categorias: fromGoogle.categorias,
-        sinopsis: fromGoogle.sinopsis,
-        portada_url: fromGoogle.portada_url,
-        total_paginas: fromGoogle.total_paginas,
-        editorial: fromGoogle.editorial,
-        anio: fromGoogle.anio,
+        return categoriasExtraidas.filter(categoria => {
+          const clave = categoria
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+          return clavesRegistradas.has(clave);
+        });
+      } catch (error) {
+        console.warn('No se pudieron validar las categorías contra Supabase:', error);
+        return [];
+      }
+    };
+
+    const inCatalog = catalogo.find(b => b.isbn === clean);
+    if (inCatalog) {
+      console.log(`[Escáner] Obra ISBN ${clean} obtenida desde: Catálogo Local / Supabase`);
+      return {
+        ...inCatalog,
+        categorias: await filtrarCategoriasRegistradas(inCatalog.categorias || []),
       };
-      setCatalogo(prev => [newBook, ...prev]);
-      return newBook;
     }
 
+    const fromExternal = await buscarLibroPorIsbn(clean);
+    if (fromExternal) {
+      // Retorna el objeto encontrado sin inyectarlo automáticamente en el catálogo ni en la BD
+      return {
+        isbn: fromExternal.isbn,
+        titulo: fromExternal.titulo,
+        autor: fromExternal.autor,
+        categorias: await filtrarCategoriasRegistradas(fromExternal.categorias),
+        sinopsis: fromExternal.sinopsis,
+        portada_url: fromExternal.portada_url,
+        total_paginas: fromExternal.total_paginas,
+        editorial: fromExternal.editorial,
+        anio: fromExternal.anio,
+      };
+    }
+
+    console.warn(`[Escáner] ISBN ${clean} no encontrado en ninguna fuente (Catálogo Local, Google Books, Open Library).`);
     return null;
   }, [catalogo]);
 

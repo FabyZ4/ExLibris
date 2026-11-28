@@ -1,7 +1,9 @@
 import { AppHeader } from '@/components/AppHeader';
 import { ProgressBar } from '@/components/ProgressBar';
 import { StarRating } from '@/components/StarRating';
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { CommentReply, Review, useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
@@ -9,8 +11,10 @@ import React, { useState } from 'react';
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +32,15 @@ const MOTIVOS_REPORTE = [
 
 type CriterioOrden = 'populares' | 'recientes' | 'calificacion';
 
+interface SelectedReportTarget {
+  id_resena: string;
+  id_respuesta?: string;
+  nombre_usuario: string;
+  titulo_libro: string;
+}
+
 export default function ComunidadScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const params = useLocalSearchParams<{ isbn?: string }>();
   const {
     resenas,
@@ -62,7 +74,7 @@ export default function ComunidadScreen() {
 
   // Modal para reportar
   const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [selectedReviewToReport, setSelectedReviewToReport] = useState<Review | null>(null);
+  const [selectedReportTarget, setSelectedReportTarget] = useState<SelectedReportTarget | null>(null);
 
   const currentUserId = currentUser?.id || 'demo-lector-id';
   const selectedBook = selectedIsbn ? catalogo.find(b => b.isbn === selectedIsbn) : null;
@@ -191,7 +203,7 @@ export default function ComunidadScreen() {
       >
         <View style={styles.replyItem}>
           <View style={styles.replyHeader}>
-            <Ionicons name="person-circle-outline" size={18} color={ExLibrisColors.primary} />
+            <Ionicons name="person-circle-outline" size={18} color={colors.primary} />
             <Text style={styles.replyAuthor}>{reply.nombre_usuario}</Text>
             <Text style={styles.replyDate}>{reply.fecha}</Text>
           </View>
@@ -206,7 +218,7 @@ export default function ComunidadScreen() {
               <Ionicons
                 name={replyLiked ? 'thumbs-up' : 'thumbs-up-outline'}
                 size={13}
-                color={replyLiked ? ExLibrisColors.primary : ExLibrisColors.textSecondary}
+                color={replyLiked ? colors.primary : colors.textSecondary}
               />
               <Text style={[styles.replyActionText, replyLiked && styles.replyActionTextActive]}>
                 {reply.likes} Me gusta
@@ -219,7 +231,7 @@ export default function ComunidadScreen() {
                 [reply.id_respuesta]: !prev[reply.id_respuesta],
               }))}
             >
-              <Ionicons name="chatbubble-outline" size={13} color={ExLibrisColors.textSecondary} />
+              <Ionicons name="chatbubble-outline" size={13} color={colors.textSecondary} />
               <Text style={styles.replyActionText}>Responder</Text>
             </Pressable>
             {isOwnReply && (
@@ -229,7 +241,18 @@ export default function ComunidadScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Eliminar mi respuesta"
               >
-                <Ionicons name="trash-outline" size={13} color={ExLibrisColors.danger} />
+                <Ionicons name="trash-outline" size={13} color={colors.danger} />
+              </Pressable>
+            )}
+            {!isOwnReply && (
+              <Pressable
+                style={styles.replyAction}
+                onPress={() => handleOpenReportModal(review, reply)}
+                accessibilityRole="button"
+                accessibilityLabel={`Reportar respuesta de ${reply.nombre_usuario}`}
+              >
+                <Ionicons name="alert-circle-outline" size={13} color={colors.textSecondary} />
+                <Text style={styles.replyActionText}>Reportar</Text>
               </Pressable>
             )}
           </View>
@@ -239,7 +262,7 @@ export default function ComunidadScreen() {
               <TextInput
                 style={styles.replyTextInput}
                 placeholder={`Responder a ${reply.nombre_usuario}...`}
-                placeholderTextColor={ExLibrisColors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 value={replyInputText[reply.id_respuesta] || ''}
                 onChangeText={text => setReplyInputText(prev => ({
                   ...prev,
@@ -263,20 +286,53 @@ export default function ComunidadScreen() {
     );
   };
 
-  const handleOpenReportModal = (review: Review) => {
-    setSelectedReviewToReport(review);
+  const handleOpenReportModal = (review: Review, reply?: CommentReply) => {
+    setSelectedReportTarget({
+      id_resena: review.id_resena,
+      id_respuesta: reply?.id_respuesta,
+      nombre_usuario: reply?.nombre_usuario || review.nombre_usuario,
+      titulo_libro: review.titulo_libro,
+    });
     setReportModalVisible(true);
   };
 
-  const handleConfirmReport = (motivo: string) => {
-    if (!selectedReviewToReport) return;
-    reportarComentario(selectedReviewToReport.id_resena, motivo);
+  const handleConfirmReport = async (motivo: string) => {
+    if (!selectedReportTarget) return;
+    try {
+      await reportarComentario(
+        selectedReportTarget.id_resena,
+        motivo,
+        selectedReportTarget.id_respuesta
+      );
+      setReportModalVisible(false);
+      setSelectedReportTarget(null);
+      Alert.alert(
+        'Reporte Enviado',
+        `Gracias por mantener la comunidad segura. El equipo de moderación revisará el comentario de ${selectedReportTarget.nombre_usuario}.`,
+        [{ text: 'Entendido' }]
+      );
+    } catch (error) {
+      let errorMessage = 'Comprueba tu conexión e inténtalo de nuevo.';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (
+        typeof error === 'object'
+        && error !== null
+        && 'message' in error
+        && typeof error.message === 'string'
+      ) {
+        errorMessage = error.message;
+      }
+      Alert.alert(
+        'No se pudo enviar el reporte',
+        errorMessage
+      );
+    }
+  };
+
+  const handleCloseReportModal = () => {
     setReportModalVisible(false);
-    Alert.alert(
-      'Reporte Enviado',
-      'Gracias por mantener la comunidad segura. El equipo de moderación revisará este comentario de inmediato.',
-      [{ text: 'Entendido' }]
-    );
+    setSelectedReportTarget(null);
   };
 
   return (
@@ -285,7 +341,16 @@ export default function ComunidadScreen() {
         subtitle={selectedBook ? `Reseñas: ${selectedBook.titulo}` : 'Muro de la Comunidad'}
       />
 
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+      >
         {/* ============================================================== */}
         {/* MODO 1: LIBRO ESPECÍFICO SELECCIONADO                          */}
         {/* ============================================================== */}
@@ -296,7 +361,7 @@ export default function ComunidadScreen() {
               style={styles.btnVolverMuro}
               onPress={() => setSelectedIsbn(null)}
             >
-              <Ionicons name="arrow-back" size={16} color={ExLibrisColors.primary} />
+              <Ionicons name="arrow-back" size={16} color={colors.primary} />
               <Text style={styles.btnVolverMuroText}>Ver muro sugerido (todos los libros)</Text>
             </Pressable>
 
@@ -355,7 +420,7 @@ export default function ComunidadScreen() {
                     <View key={item.star} style={styles.barRow}>
                       <Text style={styles.starNum}>{item.star} ★</Text>
                       <View style={styles.barWrapper}>
-                        <ProgressBar progress={item.pct} height={5} color={ExLibrisColors.primary} />
+                        <ProgressBar progress={item.pct} height={5} color={colors.primary} />
                       </View>
                       <Text style={styles.pctLabel}>{item.label}</Text>
                     </View>
@@ -394,7 +459,7 @@ export default function ComunidadScreen() {
               <TextInput
                 style={styles.commentInput}
                 placeholder={`Comparte tu crítica sobre "${selectedBook.titulo}"...`}
-                placeholderTextColor={ExLibrisColors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 multiline
                 numberOfLines={4}
                 value={userComment}
@@ -403,7 +468,7 @@ export default function ComunidadScreen() {
 
               <View style={styles.publishActionsRow}>
                 <View style={styles.rulesHintRow}>
-                  <Ionicons name="shield-outline" size={14} color={ExLibrisColors.textSecondary} />
+                  <Ionicons name="shield-outline" size={14} color={colors.textSecondary} />
                   <Text style={styles.rulesHintText}>Comunidad respetuosa</Text>
                 </View>
 
@@ -434,7 +499,7 @@ export default function ComunidadScreen() {
 
             {/* Selector horizontal de libros para filtrar a uno específico */}
             <View style={styles.carouselHeader}>
-              <Ionicons name="book-outline" size={16} color={ExLibrisColors.primary} />
+              <Ionicons name="book-outline" size={16} color={colors.primary} />
               <Text style={styles.carouselTitle}>Explorar críticas por libro:</Text>
             </View>
 
@@ -461,7 +526,7 @@ export default function ComunidadScreen() {
                         {b.titulo}
                       </Text>
                       <View style={styles.bookCardPillRating}>
-                        <Ionicons name="star" size={11} color={ExLibrisColors.gold} />
+                        <Ionicons name="star" size={11} color={colors.gold} />
                         <Text style={styles.bookCardPillScore}>
                           {bookMetrics.totalVotos > 0 && bookMetrics.promedio !== null ? bookMetrics.promedio.toFixed(1) : '—'}
                         </Text>
@@ -508,7 +573,7 @@ export default function ComunidadScreen() {
               <Ionicons
                 name="thumbs-up-outline"
                 size={13}
-                color={criterioOrden === 'populares' ? '#FFFFFF' : ExLibrisColors.textSecondary}
+                color={criterioOrden === 'populares' ? '#FFFFFF' : colors.textSecondary}
               />
               <Text
                 style={[
@@ -530,7 +595,7 @@ export default function ComunidadScreen() {
               <Ionicons
                 name="time-outline"
                 size={13}
-                color={criterioOrden === 'recientes' ? '#FFFFFF' : ExLibrisColors.textSecondary}
+                color={criterioOrden === 'recientes' ? '#FFFFFF' : colors.textSecondary}
               />
               <Text
                 style={[
@@ -552,7 +617,7 @@ export default function ComunidadScreen() {
               <Ionicons
                 name="star-outline"
                 size={13}
-                color={criterioOrden === 'calificacion' ? '#FFFFFF' : ExLibrisColors.textSecondary}
+                color={criterioOrden === 'calificacion' ? '#FFFFFF' : colors.textSecondary}
               />
               <Text
                 style={[
@@ -568,7 +633,7 @@ export default function ComunidadScreen() {
           {/* Lista de Reseñas */}
           {activeReviews.length === 0 ? (
             <View style={styles.emptyReviewsCard}>
-              <Ionicons name="chatbubbles-outline" size={44} color={ExLibrisColors.textMuted} />
+              <Ionicons name="chatbubbles-outline" size={44} color={colors.textMuted} />
               <Text style={styles.emptyReviewsTitle}>
                 {selectedBook
                   ? `Aún no hay reseñas para "${selectedBook.titulo}"`
@@ -594,18 +659,18 @@ export default function ComunidadScreen() {
                       style={styles.reviewBookTag}
                       onPress={() => setSelectedIsbn(review.isbn)}
                     >
-                      <Ionicons name="book-outline" size={13} color={ExLibrisColors.primary} />
+                      <Ionicons name="book-outline" size={13} color={colors.primary} />
                       <Text style={styles.reviewBookTagText} numberOfLines={1}>
                         {review.titulo_libro} · <Text style={{ fontStyle: 'italic' }}>{review.autor_libro}</Text>
                       </Text>
-                      <Ionicons name="chevron-forward" size={13} color={ExLibrisColors.primary} />
+                      <Ionicons name="chevron-forward" size={13} color={colors.primary} />
                     </Pressable>
                   )}
 
                   {/* Cabecera del revisor */}
                   <View style={styles.reviewCardHeader}>
                     <View style={styles.reviewerInfo}>
-                      <Ionicons name="person-circle-outline" size={32} color={ExLibrisColors.primary} />
+                      <Ionicons name="person-circle-outline" size={32} color={colors.primary} />
                       <View>
                         <View style={styles.reviewerNameRow}>
                           <Text style={styles.reviewerName}>{review.nombre_usuario}</Text>
@@ -626,15 +691,15 @@ export default function ComunidadScreen() {
                         accessibilityRole="button"
                         accessibilityLabel="Eliminar mi comentario"
                       >
-                        <Ionicons name="trash-outline" size={13} color={ExLibrisColors.danger} />
-                        <Text style={[styles.btnReportarText, { color: ExLibrisColors.danger }]}>Eliminar</Text>
+                        <Ionicons name="trash-outline" size={13} color={colors.danger} />
+                        <Text style={[styles.btnReportarText, { color: colors.danger }]}>Eliminar</Text>
                       </Pressable>
                     ) : (
                       <Pressable
                         style={styles.btnReportar}
                         onPress={() => handleOpenReportModal(review)}
                       >
-                        <Ionicons name="alert-circle-outline" size={13} color={ExLibrisColors.textSecondary} />
+                        <Ionicons name="alert-circle-outline" size={13} color={colors.textSecondary} />
                         <Text style={styles.btnReportarText}>Reportar</Text>
                       </Pressable>
                     )}
@@ -659,7 +724,7 @@ export default function ComunidadScreen() {
                       <Ionicons
                         name={yaDioLike ? 'thumbs-up' : 'thumbs-up-outline'}
                         size={15}
-                        color={yaDioLike ? ExLibrisColors.primary : ExLibrisColors.textSecondary}
+                        color={yaDioLike ? colors.primary : colors.textSecondary}
                       />
                       <Text style={[styles.likeCountText, yaDioLike && styles.likeCountTextActive]}>
                         {review.likes || 0} {review.likes === 1 ? 'Me gusta' : 'Me gusta'}
@@ -671,14 +736,14 @@ export default function ComunidadScreen() {
                       style={styles.btnRespuestasToggle}
                       onPress={() => handleToggleRespuestas(review.id_resena)}
                     >
-                      <Ionicons name="chatbubble-outline" size={14} color={ExLibrisColors.textSecondary} />
+                      <Ionicons name="chatbubble-outline" size={14} color={colors.textSecondary} />
                       <Text style={styles.repliesCountText}>
                         {totalRespuestas > 0 ? `${totalRespuestas} respuestas` : 'Comentar / Responder'}
                       </Text>
                       <Ionicons
                         name={respuestasVisibles ? 'chevron-up' : 'chevron-down'}
                         size={13}
-                        color={ExLibrisColors.textSecondary}
+                        color={colors.textSecondary}
                       />
                     </Pressable>
                   </View>
@@ -702,7 +767,7 @@ export default function ComunidadScreen() {
                         <TextInput
                           style={styles.replyTextInput}
                           placeholder={`Responder a ${review.nombre_usuario}...`}
-                          placeholderTextColor={ExLibrisColors.textMuted}
+                          placeholderTextColor={colors.textMuted}
                           value={replyInputText[review.id_resena] || ''}
                           onChangeText={text =>
                             setReplyInputText(prev => ({ ...prev, [review.id_resena]: text }))
@@ -728,25 +793,26 @@ export default function ComunidadScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Modal para enviar reporte a moderación */}
       <Modal
         visible={reportModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setReportModalVisible(false)}
+        onRequestClose={handleCloseReportModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.reportModalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.reportModalTitle}>Reportar Comentario</Text>
-              <Pressable onPress={() => setReportModalVisible(false)}>
-                <Ionicons name="close" size={22} color={ExLibrisColors.textSecondary} />
+              <Pressable onPress={handleCloseReportModal}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
             </View>
 
             <Text style={styles.reportModalSubtitle}>
-              Selecciona la infracción cometida por {selectedReviewToReport?.nombre_usuario}:
+              Selecciona la infracción cometida por {selectedReportTarget?.nombre_usuario}:
             </Text>
 
             <View style={styles.motivosList}>
@@ -756,7 +822,7 @@ export default function ComunidadScreen() {
                   style={styles.motivoItem}
                   onPress={() => handleConfirmReport(motivo)}
                 >
-                  <Ionicons name="alert-circle-outline" size={18} color={ExLibrisColors.danger} />
+                  <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
                   <Text style={styles.motivoItemText}>{motivo}</Text>
                 </Pressable>
               ))}
@@ -768,14 +834,17 @@ export default function ComunidadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
     paddingHorizontal: ExLibrisMetrics.spacingMd,
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   specificBookSection: {
     marginTop: 8,
@@ -790,7 +859,7 @@ const styles = StyleSheet.create({
   btnVolverMuroText: {
     fontSize: 12,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   generalFeedSection: {
     marginTop: 10,
@@ -798,7 +867,7 @@ const styles = StyleSheet.create({
   welcomeBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 12,
     gap: 12,
@@ -834,7 +903,7 @@ const styles = StyleSheet.create({
   carouselTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   bookSelectorRow: {
     paddingBottom: 10,
@@ -843,11 +912,11 @@ const styles = StyleSheet.create({
   bookCardPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     padding: 8,
     borderRadius: ExLibrisMetrics.radiusSm,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     width: 170,
     gap: 8,
   },
@@ -855,7 +924,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 52,
     borderRadius: 4,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   bookCardPillInfo: {
     flex: 1,
@@ -863,7 +932,7 @@ const styles = StyleSheet.create({
   bookCardPillTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   bookCardPillRating: {
     flexDirection: 'row',
@@ -874,20 +943,20 @@ const styles = StyleSheet.create({
   bookCardPillScore: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   bookCardPillCount: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   bookHeaderBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     padding: 12,
     borderRadius: ExLibrisMetrics.radiusMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 12,
     gap: 12,
   },
@@ -895,7 +964,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 72,
     borderRadius: 6,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   bookBannerInfo: {
     flex: 1,
@@ -909,11 +978,11 @@ const styles = StyleSheet.create({
   editionTag: {
     fontSize: 9,
     fontWeight: '800',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     letterSpacing: 0.5,
   },
   votosChip: {
-    backgroundColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -921,24 +990,24 @@ const styles = StyleSheet.create({
   votosChipText: {
     fontSize: 9,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   bannerBookTitle: {
     fontSize: 14,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   bannerBookAuthor: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   ratingCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: ExLibrisMetrics.spacingMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 12,
   },
   ratingMainRow: {
@@ -950,21 +1019,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingRight: 12,
     borderRightWidth: 1,
-    borderRightColor: ExLibrisColors.border,
+    borderRightColor: colors.border,
   },
   bigScore: {
     fontSize: 30,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   smallScore: {
     fontSize: 13,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '400',
   },
   ratingCountText: {
     fontSize: 9,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     marginTop: 4,
     textAlign: 'center',
   },
@@ -980,7 +1049,7 @@ const styles = StyleSheet.create({
   },
   starNum: {
     fontSize: 10,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     width: 20,
   },
   barWrapper: {
@@ -988,16 +1057,16 @@ const styles = StyleSheet.create({
   },
   pctLabel: {
     fontSize: 9,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     width: 28,
     textAlign: 'right',
   },
   publishCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: ExLibrisMetrics.spacingMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 16,
   },
   publishHeader: {
@@ -1009,12 +1078,12 @@ const styles = StyleSheet.create({
   publishHeading: {
     fontSize: 14,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   clubBadge: {
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   interactiveStarsRow: {
     flexDirection: 'row',
@@ -1025,16 +1094,16 @@ const styles = StyleSheet.create({
   ratingLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   commentInput: {
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
     borderRadius: ExLibrisMetrics.radiusSm,
     padding: 10,
     fontSize: 12,
-    color: ExLibrisColors.text,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    color: colors.text,
+    backgroundColor: colors.surfaceVariant,
     textAlignVertical: 'top',
     minHeight: 70,
     marginBottom: 10,
@@ -1051,12 +1120,12 @@ const styles = StyleSheet.create({
   },
   rulesHintText: {
     fontSize: 10,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   btnPublicar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: ExLibrisMetrics.radiusSm,
@@ -1076,11 +1145,11 @@ const styles = StyleSheet.create({
   reviewsListTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   reviewsListSubtitle: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   sortFilterChipsRow: {
@@ -1091,59 +1160,59 @@ const styles = StyleSheet.create({
   sortChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: ExLibrisMetrics.radiusPill,
     gap: 5,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   sortChipActive: {
-    backgroundColor: ExLibrisColors.primary,
-    borderColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   sortChipText: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   sortChipTextActive: {
     color: '#FFFFFF',
   },
   emptyReviewsCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 26,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   emptyReviewsTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginTop: 8,
     textAlign: 'center',
   },
   emptyReviewsSub: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 4,
     textAlign: 'center',
     maxWidth: 260,
   },
   reviewCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: 12,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   reviewBookTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -1154,7 +1223,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   reviewCardHeader: {
     flexDirection: 'row',
@@ -1175,10 +1244,10 @@ const styles = StyleSheet.create({
   reviewerName: {
     fontSize: 12,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   verifiedBadge: {
-    backgroundColor: ExLibrisColors.moderatorLight,
+    backgroundColor: colors.moderatorLight,
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 4,
@@ -1186,11 +1255,11 @@ const styles = StyleSheet.create({
   verifiedBadgeText: {
     fontSize: 9,
     fontWeight: '700',
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
   },
   reviewDate: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   btnReportar: {
     flexDirection: 'row',
@@ -1199,11 +1268,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   btnReportarText: {
     fontSize: 10,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   reviewStarsRow: {
@@ -1215,12 +1284,12 @@ const styles = StyleSheet.create({
   reviewRatingNumber: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   reviewBody: {
     fontSize: 12,
     lineHeight: 17,
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   reviewFooterRow: {
     flexDirection: 'row',
@@ -1229,7 +1298,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: ExLibrisColors.border,
+    borderTopColor: colors.border,
   },
   btnLike: {
     flexDirection: 'row',
@@ -1238,18 +1307,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: ExLibrisMetrics.radiusPill,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   btnLikeActive: {
-    backgroundColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
   },
   likeCountText: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   likeCountTextActive: {
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     fontWeight: '700',
   },
   btnRespuestasToggle: {
@@ -1261,25 +1330,25 @@ const styles = StyleSheet.create({
   },
   repliesCountText: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   repliesContainer: {
     marginTop: 10,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: ExLibrisColors.border,
-    backgroundColor: '#FAFAF8',
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
     borderRadius: ExLibrisMetrics.radiusSm,
     padding: 8,
   },
   replyItem: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     padding: 8,
     borderRadius: ExLibrisMetrics.radiusSm,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   replyThread: {
     marginBottom: 4,
@@ -1293,16 +1362,16 @@ const styles = StyleSheet.create({
   replyAuthor: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   replyDate: {
     fontSize: 9,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     marginLeft: 'auto',
   },
   replyContent: {
     fontSize: 11,
-    color: ExLibrisColors.text,
+    color: colors.text,
     lineHeight: 15,
   },
   replyActionsRow: {
@@ -1320,15 +1389,15 @@ const styles = StyleSheet.create({
   },
   replyActionText: {
     fontSize: 10,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   replyActionTextActive: {
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   noRepliesText: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontStyle: 'italic',
     marginBottom: 6,
   },
@@ -1340,17 +1409,17 @@ const styles = StyleSheet.create({
   },
   replyTextInput: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
     borderRadius: ExLibrisMetrics.radiusSm,
     paddingHorizontal: 8,
     paddingVertical: 6,
     fontSize: 11,
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   btnEnviarReply: {
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     width: 32,
     height: 32,
     borderRadius: ExLibrisMetrics.radiusSm,
@@ -1366,7 +1435,7 @@ const styles = StyleSheet.create({
   },
   reportModalCard: {
     width: '100%',
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusLg,
     padding: ExLibrisMetrics.spacingLg,
   },
@@ -1379,11 +1448,11 @@ const styles = StyleSheet.create({
   reportModalTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   reportModalSubtitle: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 14,
   },
   motivosList: {
@@ -1393,16 +1462,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderRadius: ExLibrisMetrics.radiusSm,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     gap: 10,
   },
   motivoItemText: {
     fontSize: 12,
     fontWeight: '600',
-    color: ExLibrisColors.text,
+    color: colors.text,
     flex: 1,
   },
 });

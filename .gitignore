@@ -39,11 +39,14 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Proyecto
+AGENTS.md
+PROJECT_CONTEXT.md
+.agents/
+supabase/
+
 example
 
 # generated native folders
 /ios
 /android
-
-# IA
-AGENTS.md

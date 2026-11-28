@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  ScrollView,
   TextInput,
   Image,
   ActivityIndicator,
@@ -15,9 +18,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useExLibris, Book } from '@/store/ExLibrisContext';
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 
 export default function EscanerScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
   const { buscarObrasPorIsbn, agregarALaBiblioteca } = useExLibris();
   const [permission, requestPermission] = useCameraPermissions();
@@ -27,6 +33,10 @@ export default function EscanerScreen() {
   const [detectedIsbn, setDetectedIsbn] = useState<string>('');
   const [selectedEstado, setSelectedEstado] = useState<'por_leer' | 'leyendo' | 'leido'>('leyendo');
   const [buscando, setBuscando] = useState(false);
+
+  // Control de cooldown y debounce del escáner (mínimo 3 segundos entre lecturas)
+  const ultimoEscaneoRef = useRef<number>(0);
+  const procesandoRef = useRef<boolean>(false);
 
   // Modal para ingreso manual
   const [manualModalVisible, setManualModalVisible] = useState(false);
@@ -51,6 +61,7 @@ export default function EscanerScreen() {
     const clean = isbn.replace(/[-\s]/g, '').trim();
     if (!clean) return;
 
+    procesandoRef.current = true;
     setDetectedIsbn(clean);
     setBuscando(true);
 
@@ -62,19 +73,38 @@ export default function EscanerScreen() {
       } else {
         Alert.alert(
           'ISBN no encontrado',
-          `El código "${clean}" no está en el catálogo local ni en Google Books.\n\nUsa el botón "Ingreso manual" y selecciona uno de los ISBNs de prueba para la demostración.`,
-          [{ text: 'Entendido' }]
+          `No se encontró el código "${clean}". Puedes ingresar los datos manualmente o intentar nuevamente.`,
+          [
+            { text: 'Entendido', style: 'cancel' },
+            {
+              text: 'Proponer libro',
+              onPress: () => router.push({
+                pathname: '/solicitud_libro',
+                params: { isbn: clean },
+              }),
+            },
+          ]
         );
       }
     } catch {
       Alert.alert('Error', 'Ocurrió un error al consultar el catálogo.');
     } finally {
       setBuscando(false);
+      // Retardo de 3 segundos antes de permitir que la cámara vuelva a capturar
+      setTimeout(() => {
+        procesandoRef.current = false;
+      }, 3000);
     }
   };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    if (scanned || buscando) return;
+    const ahora = Date.now();
+    // Bloquear si ya hay un libro escaneado, si se está buscando o si no han pasado 3 segundos
+    if (scanned || buscando || procesandoRef.current || ahora - ultimoEscaneoRef.current < 3000) {
+      return;
+    }
+    ultimoEscaneoRef.current = ahora;
+    procesandoRef.current = true;
     procesarIsbn(data);
   };
 
@@ -131,7 +161,7 @@ export default function EscanerScreen() {
       {/* Barra superior del Escáner */}
       <View style={styles.topBar}>
         <Pressable style={styles.navButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={22} color={ExLibrisColors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <View style={styles.topTitleRow}>
           <View style={styles.brandBadge}>
@@ -139,7 +169,7 @@ export default function EscanerScreen() {
           </View>
           <Text style={styles.topTitle}>Escanear Isbn</Text>
         </View>
-        <Ionicons name="person-circle-outline" size={28} color={ExLibrisColors.primary} />
+        <Ionicons name="person-circle-outline" size={28} color={colors.primary} />
       </View>
 
       {/* Vista de Cámara o Fallback si no hay permisos */}
@@ -155,7 +185,7 @@ export default function EscanerScreen() {
           />
         ) : (
           <View style={styles.permissionFallback}>
-            <Ionicons name="camera-reverse-outline" size={54} color={ExLibrisColors.primary} />
+            <Ionicons name="camera-reverse-outline" size={54} color={colors.primary} />
             <Text style={styles.permissionTitle}>Permiso de Cámara Requerido</Text>
             <Text style={styles.permissionText}>
               Para escanear códigos de barras físicos, activa la cámara de tu dispositivo.
@@ -197,7 +227,7 @@ export default function EscanerScreen() {
 
           {buscando && (
             <View style={styles.searchingCard}>
-              <ActivityIndicator color={ExLibrisColors.primary} size="small" />
+              <ActivityIndicator color={colors.primary} size="small" />
               <Text style={styles.searchingText}>Consultando Google Books API...</Text>
             </View>
           )}
@@ -211,10 +241,10 @@ export default function EscanerScreen() {
 
           <View style={styles.detectedHeader}>
             <View style={styles.detectedCheckRow}>
-              <Ionicons name="checkmark-circle" size={18} color="#2E7D32" />
-              <Text style={styles.detectedTitle}>ISBN detectado</Text>
+              <Ionicons name="alert-circle-outline" size={20} color="#D97706" />
+              <Text style={styles.detectedTitle}>Verifica si es tu libro</Text>
             </View>
-            <Text style={styles.detectedCode}>{detectedIsbn}</Text>
+            <Text style={styles.detectedCode}>ISBN: {detectedIsbn}</Text>
           </View>
 
           {/* Ficha técnica resumida */}
@@ -233,13 +263,13 @@ export default function EscanerScreen() {
               </Text>
               <Text style={styles.detectedBookAuthor}>{detectedBook.autor}</Text>
               <Text style={styles.detectedEditorial}>
-                {detectedBook.editorial} · {detectedBook.anio || 2024}
+                {detectedBook.editorial} · {detectedBook.total_paginas} págs. · {detectedBook.anio || 2024}
               </Text>
             </View>
           </View>
 
           {/* Selector de estado en biblioteca */}
-          <Text style={styles.estadoSectionTitle}>Estado en la biblioteca</Text>
+          <Text style={styles.estadoSectionTitle}>Estado en tu biblioteca personal</Text>
           <View style={styles.estadoSelectorRow}>
             {(['por_leer', 'leyendo', 'leido'] as const).map(est => (
               <Pressable
@@ -267,13 +297,14 @@ export default function EscanerScreen() {
             style={styles.btnConfirmar}
             onPress={handleConfirmarYGuardar}
           >
-            <Ionicons name="book-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.btnConfirmarText}>Confirmar y Guardar en ExLibris</Text>
+            <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.btnConfirmarText}>Sí, es este libro (Guardar)</Text>
           </Pressable>
 
           <Pressable style={styles.btnReintentar} onPress={handleReintentar}>
-            <Text style={styles.btnReintentarText}>
-              ¿No es este ejemplar? Reintentar escaneo
+            <Ionicons name="close-circle-outline" size={16} color="#DC2626" style={{ marginRight: 6 }} />
+            <Text style={[styles.btnReintentarText, { color: '#DC2626' }]}>
+              No es este libro (Descartar y volver a escanear)
             </Text>
           </Pressable>
         </View>
@@ -286,12 +317,21 @@ export default function EscanerScreen() {
         animationType="slide"
         onRequestClose={() => setManualModalVisible(false)}
       >
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardAvoiding}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
         <View style={styles.modalOverlay}>
           <View style={styles.manualModalContent}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.manualModalScrollContent}
+          >
             <View style={styles.manualModalHeader}>
               <Text style={styles.manualModalTitle}>Ingreso Manual de ISBN</Text>
               <Pressable onPress={() => setManualModalVisible(false)}>
-                <Ionicons name="close" size={24} color={ExLibrisColors.textSecondary} />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
             </View>
 
@@ -338,14 +378,16 @@ export default function EscanerScreen() {
               <Ionicons name="search" size={18} color="#FFFFFF" />
               <Text style={styles.btnBuscarManualText}>Buscar libro</Text>
             </Pressable>
+          </ScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
@@ -356,9 +398,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: ExLibrisMetrics.spacingMd,
     paddingVertical: 10,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: ExLibrisColors.border,
+    borderBottomColor: colors.border,
   },
   navButton: {
     padding: 6,
@@ -372,21 +414,21 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 6,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   topTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   avatarMini: {
     width: 28,
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: ExLibrisColors.primary,
+    borderColor: colors.primary,
   },
   cameraContainer: {
     flex: 1,
@@ -394,7 +436,7 @@ const styles = StyleSheet.create({
   },
   permissionFallback: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     padding: ExLibrisMetrics.spacingLg,
@@ -402,18 +444,18 @@ const styles = StyleSheet.create({
   permissionTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginTop: 12,
   },
   permissionText: {
     fontSize: 13,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 6,
     marginBottom: 16,
   },
   btnPermiso: {
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: ExLibrisMetrics.radiusPill,
@@ -498,7 +540,7 @@ const styles = StyleSheet.create({
   searchingCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: ExLibrisMetrics.radiusPill,
@@ -507,14 +549,14 @@ const styles = StyleSheet.create({
   searchingText: {
     fontSize: 12,
     fontWeight: '600',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   bottomSheetCard: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     padding: ExLibrisMetrics.spacingMd,
@@ -528,7 +570,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: ExLibrisColors.borderDark,
+    backgroundColor: colors.borderDark,
     alignSelf: 'center',
     marginBottom: 10,
   },
@@ -537,7 +579,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: ExLibrisColors.border,
+    borderBottomColor: colors.border,
     paddingBottom: 8,
     marginBottom: 10,
   },
@@ -549,11 +591,11 @@ const styles = StyleSheet.create({
   detectedTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   detectedCode: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   bookSummaryRow: {
@@ -565,7 +607,7 @@ const styles = StyleSheet.create({
     width: 65,
     height: 95,
     borderRadius: ExLibrisMetrics.radiusSm,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
   },
   detectedInfo: {
     flex: 1,
@@ -574,29 +616,29 @@ const styles = StyleSheet.create({
   detectedCategory: {
     fontSize: 10,
     fontWeight: '700',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
     letterSpacing: 0.5,
   },
   detectedBookTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginTop: 2,
   },
   detectedBookAuthor: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   detectedEditorial: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
     marginTop: 4,
   },
   estadoSectionTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 6,
   },
   estadoSelectorRow: {
@@ -608,19 +650,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 7,
     borderRadius: ExLibrisMetrics.radiusPill,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   estadoBtnActive: {
-    backgroundColor: ExLibrisColors.primary,
-    borderColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   estadoBtnText: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   estadoBtnTextActive: {
     color: '#FFFFFF',
@@ -629,7 +671,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     borderRadius: ExLibrisMetrics.radiusSm,
     gap: 8,
@@ -646,7 +688,7 @@ const styles = StyleSheet.create({
   },
   btnReintentarText: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     textDecorationLine: 'underline',
   },
   modalOverlay: {
@@ -656,10 +698,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  modalKeyboardAvoiding: {
+    flex: 1,
+  },
   manualModalContent: {
     width: '100%',
-    backgroundColor: ExLibrisColors.surface,
+    maxHeight: '90%',
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusLg,
+    overflow: 'hidden',
+  },
+  manualModalScrollContent: {
     padding: ExLibrisMetrics.spacingLg,
   },
   manualModalHeader: {
@@ -671,27 +720,27 @@ const styles = StyleSheet.create({
   manualModalTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   manualModalDesc: {
     fontSize: 12,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 10,
   },
   manualInput: {
     borderWidth: 1,
-    borderColor: ExLibrisColors.borderDark,
+    borderColor: colors.borderDark,
     borderRadius: ExLibrisMetrics.radiusSm,
     padding: 10,
     fontSize: 15,
-    color: ExLibrisColors.text,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    color: colors.text,
+    backgroundColor: colors.surfaceVariant,
     marginBottom: 14,
   },
   presetTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 6,
   },
   presetsList: {
@@ -702,23 +751,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     padding: 8,
-    backgroundColor: ExLibrisColors.surfaceVariant,
+    backgroundColor: colors.surfaceVariant,
     borderRadius: ExLibrisMetrics.radiusSm,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
   },
   presetBook: {
     fontSize: 11,
     fontWeight: '600',
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   presetIsbn: {
     fontSize: 10,
-    color: ExLibrisColors.textMuted,
+    color: colors.textMuted,
   },
   btnBuscarManual: {
     flexDirection: 'row',
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     borderRadius: ExLibrisMetrics.radiusSm,
     alignItems: 'center',

@@ -1,4 +1,6 @@
-import { ExLibrisColors, ExLibrisMetrics } from '@/constants/theme';
+import { ExLibrisMetrics } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
+import { useExLibrisStyles } from '@/hooks/useExLibrisStyles';
 import { useExLibris } from '@/store/ExLibrisContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -13,8 +15,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function PerfilScreen() {
+  const { colors, styles } = useExLibrisStyles(createStyles);
   const router = useRouter();
-  const { currentUser, userRole, cerrarSesion, biblioteca } = useExLibris();
+  const {
+    currentUser,
+    userRole,
+    cerrarSesion,
+    biblioteca,
+    revisionesPendientesCount,
+  } = useExLibris();
 
   const enCurso = biblioteca.filter(b => b.estado === 'leyendo').length;
   const leidos = biblioteca.filter(b => b.estado === 'leido').length;
@@ -62,7 +71,7 @@ export default function PerfilScreen() {
             <Ionicons
               name={userRole === 'moderador' ? 'shield-checkmark-outline' : 'person-circle-outline'}
               size={13}
-              color={userRole === 'moderador' ? ExLibrisColors.moderator : ExLibrisColors.primary}
+              color={userRole === 'moderador' ? colors.moderator : colors.primary}
             />
             <Text style={[
               styles.roleText,
@@ -78,19 +87,19 @@ export default function PerfilScreen() {
           <Text style={styles.sectionTitle}>Mi Biblioteca</Text>
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Ionicons name="book-outline" size={20} color={ExLibrisColors.primary} />
+              <Ionicons name="book-outline" size={20} color={colors.primary} />
               <Text style={styles.statNumber}>{enCurso}</Text>
               <Text style={styles.statLabel}>Leyendo</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Ionicons name="list-outline" size={20} color={ExLibrisColors.textSecondary} />
+              <Ionicons name="list-outline" size={20} color={colors.textSecondary} />
               <Text style={styles.statNumber}>{porLeer}</Text>
               <Text style={styles.statLabel}>Por leer</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Ionicons name="checkmark-done-outline" size={20} color={ExLibrisColors.progress} />
+              <Ionicons name="checkmark-done-outline" size={20} color={colors.progress} />
               <Text style={styles.statNumber}>{leidos}</Text>
               <Text style={styles.statLabel}>Leídos</Text>
             </View>
@@ -106,14 +115,51 @@ export default function PerfilScreen() {
             <Pressable
               style={styles.optionRow}
               onPress={handleIrModeracion}
+              accessibilityLabel={`Panel de Moderación${revisionesPendientesCount > 0 ? ', hay revisiones pendientes' : ''}`}
             >
               <View style={styles.optionLeft}>
-                <Ionicons name="shield-checkmark-outline" size={20} color={ExLibrisColors.moderator} />
+                <Ionicons name="shield-checkmark-outline" size={20} color={colors.moderator} />
                 <Text style={styles.optionText}>Panel de Moderación</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={ExLibrisColors.textMuted} />
+              <View style={styles.optionRight}>
+                {revisionesPendientesCount > 0 && <View style={styles.pendingReviewDot} />}
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </View>
             </Pressable>
           )}
+
+          <Pressable
+            style={styles.optionRow}
+            onPress={() => router.push('/solicitud_libro')}
+          >
+            <View style={styles.optionLeft}>
+              <Ionicons name="book-outline" size={20} color={colors.primary} />
+              <Text style={styles.optionText}>Proponer un libro o corrección</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
+
+          <Pressable
+            style={styles.optionRow}
+            onPress={() => router.push('/configuraciones')}
+          >
+            <View style={styles.optionLeft}>
+              <Ionicons name="person-circle-outline" size={20} color={colors.primary} />
+              <Text style={styles.optionText}>Configuraciones</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
+
+          <Pressable
+            style={styles.optionRow}
+            onPress={() => router.push('/contacto')}
+          >
+            <View style={styles.optionLeft}>
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.primary} />
+              <Text style={styles.optionText}>Contáctanos</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
 
           {/* Cerrar sesión */}
           <Pressable
@@ -121,8 +167,8 @@ export default function PerfilScreen() {
             onPress={handleCerrarSesion}
           >
             <View style={styles.optionLeft}>
-              <Ionicons name="power-outline" size={20} color={ExLibrisColors.danger} />
-              <Text style={[styles.optionText, { color: ExLibrisColors.danger }]}>
+              <Ionicons name="power-outline" size={20} color={colors.danger} />
+              <Text style={[styles.optionText, { color: colors.danger }]}>
                 Cerrar Sesión
               </Text>
             </View>
@@ -135,10 +181,10 @@ export default function PerfilScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: ExLibrisColors.background,
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
@@ -152,11 +198,11 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: ExLibrisColors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
-    shadowColor: ExLibrisColors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -165,11 +211,11 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 22,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   userEmail: {
     fontSize: 13,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 4,
   },
   rolePill: {
@@ -182,33 +228,33 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   rolePillLector: {
-    backgroundColor: ExLibrisColors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
   },
   rolePillMod: {
-    backgroundColor: ExLibrisColors.moderatorLight,
+    backgroundColor: colors.moderatorLight,
   },
   roleText: {
     fontSize: 12,
     fontWeight: '700',
   },
   roleTextLector: {
-    color: ExLibrisColors.primary,
+    color: colors.primary,
   },
   roleTextMod: {
-    color: ExLibrisColors.moderator,
+    color: colors.moderator,
   },
   statsCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: ExLibrisMetrics.spacingMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 14,
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: ExLibrisColors.text,
+    color: colors.text,
     marginBottom: 12,
   },
   statsRow: {
@@ -223,23 +269,23 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 40,
-    backgroundColor: ExLibrisColors.border,
+    backgroundColor: colors.border,
   },
   statNumber: {
     fontSize: 22,
     fontWeight: '800',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
   statLabel: {
     fontSize: 11,
-    color: ExLibrisColors.textSecondary,
+    color: colors.textSecondary,
   },
   optionsCard: {
-    backgroundColor: ExLibrisColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: ExLibrisMetrics.radiusMd,
     padding: ExLibrisMetrics.spacingMd,
     borderWidth: 1,
-    borderColor: ExLibrisColors.border,
+    borderColor: colors.border,
     marginBottom: 14,
   },
   optionRow: {
@@ -248,7 +294,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ExLibrisColors.border,
+    borderBottomColor: colors.border,
+  },
+  optionRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pendingReviewDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.danger,
+    marginRight: 8,
   },
   optionRowDanger: {
     borderBottomWidth: 0,
@@ -261,6 +318,6 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 14,
     fontWeight: '600',
-    color: ExLibrisColors.text,
+    color: colors.text,
   },
 });
